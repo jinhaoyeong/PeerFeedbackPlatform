@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.DS_Store
+.env
+.env.*
+prisma/dev.db
+dev.db
+*.log
+# Exclude user-requested local files and folders from GitHub
+.claude/
+.serena/
+COMPLETE-FUNCTIONALITY-SUMMARY.md
+testuser.txt
+nul
