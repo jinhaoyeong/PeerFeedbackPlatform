@@ -6,22 +6,4 @@ node_modules/
 prisma/dev.db
 dev.db
 *.log
-# Exclude user-requested local files and folders from GitHub
-.claude/
-.serena/
-COMPLETE-FUNCTIONALITY-SUMMARY.md
-testuser.txt
-nul
-coverage/
-dist/
-build/
-out/
-.turbo/
-.vercel/
-.cache/
-.eslintcache
-.vscode/
-.idea/
-Thumbs.db
-*.tsbuildinfo
-.trae/
+
