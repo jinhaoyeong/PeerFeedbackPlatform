@@ -41,5 +41,4 @@ Full‑stack platform for safe, structured peer feedback in student groups. It b
 - Realtime: Socket.io
 - Auth & Security: JWT, 2FA (otplib)
 
-## License
-MIT
+
