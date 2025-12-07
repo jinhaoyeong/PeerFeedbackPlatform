@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { FeedbackService } from '@/lib/feedback-service'
+import { NotificationService } from '@/lib/notifications'
+import { prisma } from '@/lib/prisma'
 import { getUserFromRequest } from '@/lib/middleware'
 
 export async function POST(request: NextRequest) {
@@ -13,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { groupId, title, description, startsAt, endsAt, allowSelfFeedback, allowAnonymousFeedback } = body
+    const { groupId, title, description, startsAt, endsAt, allowSelfFeedback, allowAnonymousFeedback, notifyOnCreate } = body
 
     const session = await FeedbackService.createSession(user.id, {
       groupId,
@@ -24,6 +26,23 @@ export async function POST(request: NextRequest) {
       allowSelfFeedback,
       allowAnonymousFeedback
     })
+
+    if (notifyOnCreate) {
+      try {
+        const members = await prisma.groupMember.findMany({
+          where: { groupId },
+          include: { user: { select: { id: true, fullName: true } } }
+        })
+        const creatorName = user.fullName || user.username || 'Group Admin'
+        await Promise.all(
+          (members || [])
+            .filter((m: any) => m.userId !== user.id)
+            .map((m: any) => NotificationService.notifySessionInvitation(m.user.id, title, creatorName))
+        )
+      } catch (e) {
+        console.error('Failed to send session creation notifications:', e)
+      }
+    }
 
     return NextResponse.json({
       session,

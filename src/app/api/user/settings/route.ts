@@ -49,7 +49,6 @@ export async function GET(request: NextRequest) {
       showInGroupDirectory: stored?.showInGroupDirectory ?? true,
       pushNotifications: stored?.pushNotifications ?? false,
       loginAlertsEnabled: stored?.loginAlertsEnabled ?? false,
-      showActivityStatus: stored?.showActivityStatus ?? true,
       allowMessaging: stored?.allowMessaging ?? true,
       profileVisibility: stored?.profileVisibility ?? (stored?.showInGroupDirectory === false ? 'private' : 'public')
     }
@@ -73,21 +72,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { privacySettings, otherSettings } = body
-
-    const merged = {
-      emailNotifications: !!privacySettings?.receiveEmailNotifications,
-      allowAnonymousFeedback: !!privacySettings?.allowAnonymousFeedback,
-      showInGroupDirectory: !!privacySettings?.showInGroupDirectory,
-      darkMode: !!otherSettings?.darkMode,
-      language: String(otherSettings?.language || 'en'),
-      timezone: String(otherSettings?.timezone || 'UTC'),
-      pushNotifications: !!(body.pushNotifications ?? false),
-      loginAlertsEnabled: !!otherSettings?.loginAlertsEnabled,
-      showActivityStatus: !!otherSettings?.showActivityStatus,
-      allowMessaging: typeof otherSettings?.allowMessaging === 'undefined' ? true : !!otherSettings?.allowMessaging,
-      profileVisibility: String(otherSettings?.profileVisibility || (privacySettings?.showInGroupDirectory === false ? 'private' : 'public'))
-    }
+  const { privacySettings, otherSettings } = body
 
     const latest = await prisma.auditLog.findFirst({
       where: { userId: user.userId, action: 'USER_SETTINGS' },
@@ -96,9 +81,9 @@ export async function PUT(request: NextRequest) {
 
     let previous: any = null
     try { previous = latest?.details ? JSON.parse(latest.details) : null } catch {}
-    const previousVersion = Number(previous?.version || 1)
-    const baseVersion = Number(body.baseVersion || previousVersion)
-    if (baseVersion < previousVersion) {
+  const previousVersion = Number(previous?.version || 1)
+  const baseVersion = Number(body.baseVersion || previousVersion)
+  if (baseVersion < previousVersion) {
       return NextResponse.json({
         error: 'Version conflict',
         conflict: true,
@@ -106,17 +91,32 @@ export async function PUT(request: NextRequest) {
         latestSettings: previous
       }, { status: 409 })
     }
-    const newVersion = previousVersion + 1
+  const merged: any = {
+    emailNotifications: typeof privacySettings?.receiveEmailNotifications !== 'undefined' ? !!privacySettings.receiveEmailNotifications : (typeof previous?.emailNotifications !== 'undefined' ? previous.emailNotifications : true),
+    allowAnonymousFeedback: typeof privacySettings?.allowAnonymousFeedback !== 'undefined' ? !!privacySettings.allowAnonymousFeedback : (typeof previous?.allowAnonymousFeedback !== 'undefined' ? previous.allowAnonymousFeedback : true),
+    showInGroupDirectory: typeof privacySettings?.showInGroupDirectory !== 'undefined' ? !!privacySettings.showInGroupDirectory : (typeof previous?.showInGroupDirectory !== 'undefined' ? previous.showInGroupDirectory : true),
+    darkMode: typeof otherSettings?.darkMode !== 'undefined' ? !!otherSettings.darkMode : (typeof previous?.darkMode !== 'undefined' ? previous.darkMode : false),
+    language: typeof otherSettings?.language !== 'undefined' ? String(otherSettings.language) : (previous?.language ?? 'en'),
+    timezone: typeof otherSettings?.timezone !== 'undefined' ? String(otherSettings.timezone) : (previous?.timezone ?? 'UTC'),
+    pushNotifications: typeof body.pushNotifications !== 'undefined' ? !!body.pushNotifications : (typeof previous?.pushNotifications !== 'undefined' ? previous.pushNotifications : false),
+    loginAlertsEnabled: typeof otherSettings?.loginAlertsEnabled !== 'undefined' ? !!otherSettings.loginAlertsEnabled : (typeof previous?.loginAlertsEnabled !== 'undefined' ? previous.loginAlertsEnabled : false),
+    allowMessaging: typeof otherSettings?.allowMessaging !== 'undefined' ? !!otherSettings.allowMessaging : (typeof previous?.allowMessaging !== 'undefined' ? previous.allowMessaging : true)
+  }
+  merged.profileVisibility = typeof otherSettings?.profileVisibility !== 'undefined'
+    ? String(otherSettings.profileVisibility)
+    : (typeof previous?.profileVisibility !== 'undefined' ? previous.profileVisibility : (merged.showInGroupDirectory === false ? 'private' : 'public'))
 
-    await prisma.auditLog.create({
-      data: {
-        userId: user.userId,
-        action: 'USER_SETTINGS',
-        resource: 'User',
-        resourceId: user.userId,
-        details: JSON.stringify({ ...merged, version: newVersion, updatedAt: new Date().toISOString() })
-      }
-    })
+  const newVersion = previousVersion + 1
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.userId,
+      action: 'USER_SETTINGS',
+      resource: 'User',
+      resourceId: user.userId,
+      details: JSON.stringify({ ...merged, version: newVersion, updatedAt: new Date().toISOString() })
+    }
+  })
 
     return NextResponse.json({
       message: 'Settings updated successfully',

@@ -189,36 +189,14 @@ export function useSocket(): SocketHookReturn {
     }
   }
 
-  const startTyping = (sessionId: string, targetUserId?: string) => {
-    const showActivity = (() => {
-      try {
-        const raw = typeof window !== 'undefined' ? window.localStorage.getItem('user-settings') : null
-        if (!raw) return true
-        const s = JSON.parse(raw)
-        return s.showActivityStatus !== false
-      } catch {
-        return true
-      }
-    })()
-    if (socketRef.current && showActivity) {
-      socketRef.current.emit('typing_start', { sessionId, targetUserId })
-    }
+  const startTyping = (_sessionId: string, _targetUserId?: string) => {
+    // Activity status removed: do not emit typing events
+    return
   }
 
-  const stopTyping = (sessionId: string, targetUserId?: string) => {
-    const showActivity = (() => {
-      try {
-        const raw = typeof window !== 'undefined' ? window.localStorage.getItem('user-settings') : null
-        if (!raw) return true
-        const s = JSON.parse(raw)
-        return s.showActivityStatus !== false
-      } catch {
-        return true
-      }
-    })()
-    if (socketRef.current && showActivity) {
-      socketRef.current.emit('typing_stop', { sessionId, targetUserId })
-    }
+  const stopTyping = (_sessionId: string, _targetUserId?: string) => {
+    // Activity status removed: do not emit typing events
+    return
   }
 
   const notifyMemberJoinedGroup = (groupId: string, memberInfo: any) => {

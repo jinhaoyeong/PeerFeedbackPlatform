@@ -22,7 +22,7 @@ export const config = {
 
 class SocketService {
   private io: ServerIO | null = null
-  private userSettingsCache: Map<string, { showActivityStatus?: boolean; allowMessaging?: boolean }> = new Map()
+  private userSettingsCache: Map<string, { allowMessaging?: boolean }> = new Map()
 
   init(res: NextApiResponseServerIO) {
     if (!this.io) {
@@ -80,9 +80,8 @@ class SocketService {
                 })
                 let stored: any = null
                 try { stored = latest?.details ? JSON.parse(latest.details as any) : null } catch {}
-                const showActivityStatus = stored?.showActivityStatus ?? true
                 const allowMessaging = stored?.allowMessaging ?? true
-                this.userSettingsCache.set(user.id, { showActivityStatus, allowMessaging })
+                this.userSettingsCache.set(user.id, { allowMessaging })
               } catch {}
             }
           }
@@ -99,10 +98,6 @@ class SocketService {
           const userId = socket.data.userId
           if (!userId) return
           const next = payload?.settings || {}
-          if (typeof next.showActivityStatus !== 'undefined') {
-            const prev = this.userSettingsCache.get(userId) || {}
-            this.userSettingsCache.set(userId, { ...prev, showActivityStatus: !!next.showActivityStatus })
-          }
           if (typeof next.allowMessaging !== 'undefined') {
             const prev = this.userSettingsCache.get(userId) || {}
             this.userSettingsCache.set(userId, { ...prev, allowMessaging: !!next.allowMessaging })
@@ -327,34 +322,7 @@ class SocketService {
         }
       })
 
-      // Handle typing indicators
-      socket.on('typing_start', (data: { sessionId: string; targetUserId?: string }) => {
-        const showActivity = this.userSettingsCache.get(socket.data.userId || '')?.showActivityStatus
-        if (showActivity === false) return
-        const roomName = data.targetUserId
-          ? `user:${data.targetUserId}`
-          : `session:${data.sessionId}`
-
-        socket.to(roomName).emit('user_typing', {
-          userId: socket.data.userId,
-          username: socket.data.user.username,
-          sessionId: data.sessionId
-        })
-      })
-
-      socket.on('typing_stop', (data: { sessionId: string; targetUserId?: string }) => {
-        const showActivity = this.userSettingsCache.get(socket.data.userId || '')?.showActivityStatus
-        if (showActivity === false) return
-        const roomName = data.targetUserId
-          ? `user:${data.targetUserId}`
-          : `session:${data.sessionId}`
-
-        socket.to(roomName).emit('user_stop_typing', {
-          userId: socket.data.userId,
-          username: socket.data.user.username,
-          sessionId: data.sessionId
-        })
-      })
+          
 
       // Handle disconnection
       socket.on('disconnect', (reason) => {

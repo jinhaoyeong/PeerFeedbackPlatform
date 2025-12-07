@@ -8,7 +8,7 @@ const features = [
   {
     icon: Shield,
     title: 'Complete Anonymity',
-    description: 'Your identity is protected through advanced cryptographic hashing and multi-layer anonymity systems.',
+    description: 'Share feedback without revealing your identity. Anonymous mode is built in.',
   },
   {
     icon: Users,
@@ -18,22 +18,22 @@ const features = [
   {
     icon: MessageSquare,
     title: 'Constructive Feedback',
-    description: 'AI-powered sentiment analysis ensures feedback remains helpful, respectful, and actionable.',
+    description: 'Structured prompts and rating scales keep feedback helpful, respectful, and actionable.',
   },
   {
     icon: BarChart3,
     title: 'Actionable Insights',
-    description: 'Track your progress with detailed analytics and personalized improvement recommendations.',
+    description: 'Track progress with simple charts, session summaries, and activity timelines.',
   },
   {
     icon: Lock,
     title: 'Enterprise Security',
-    description: 'Bank-level encryption, comprehensive audit trails, and GDPR compliance protect your data.',
+    description: 'Secure authentication, role-based access, and audit logs protect your data.',
   },
   {
     icon: Zap,
     title: 'Real-time Updates',
-    description: 'Get instant notifications when new feedback arrives, with live collaboration features.',
+    description: 'Get instant notifications when new feedback arrives with real-time updates.',
   }
 ]
 
@@ -63,7 +63,7 @@ export function FeaturesSection() {
   }
 
   return (
-    <section id="features" className="py-24 px-6 bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
+    <section id="features" className="py-24 px-6 relative overflow-hidden z-10">
       <div className="max-w-7xl mx-auto relative z-10">
         <div className="mb-16">
           <motion.h2 

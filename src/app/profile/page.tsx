@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/components/auth-provider'
-import { UserCircle, Mail, Calendar, Shield, Edit2, Save, X, ArrowLeft, QrCode } from 'lucide-react'
+import { UserCircle, Mail, Calendar, Shield, Edit2, Save, X, ArrowLeft, QrCode, CheckCircle, AlertCircle } from 'lucide-react'
 import { useSettings } from '@/components/settings-provider'
 import { useRouter, useSearchParams } from 'next/navigation'
 
@@ -22,7 +22,7 @@ interface UserProfile {
 }
 
 export default function ProfilePage() {
-  const { user, token } = useAuth()
+  const { user, token, twoFATempToken } = useAuth()
   const router = useRouter()
   const search = useSearchParams()
   const { formatDate, features, syncStatus } = useSettings()
@@ -42,8 +42,14 @@ export default function ProfilePage() {
   const [twoFAQr, setTwoFAQr] = useState<string>('')
   const [twoFAVisible, setTwoFAVisible] = useState(false)
   const [twoFACode, setTwoFACode] = useState('')
+  const [modalMessage, setModalMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [isCurrentPasswordValid, setIsCurrentPasswordValid] = useState<boolean | null>(null)
   const [verifyingPassword, setVerifyingPassword] = useState(false)
+  const [passwordCode, setPasswordCode] = useState('')
+  const [codeSent, setCodeSent] = useState(false)
+  const [requestingCode, setRequestingCode] = useState(false)
+  const [confirmingChange, setConfirmingChange] = useState(false)
+  const [twoFAMethod, setTwoFAMethod] = useState<'totp' | 'email'>('totp')
 
   useEffect(() => {
     if (user) {
@@ -133,27 +139,100 @@ export default function ProfilePage() {
       setMessage({ type: 'error', text: 'Please verify your current password' })
       return
     }
-
-    setLoading(true)
+    setRequestingCode(true)
     setMessage(null)
 
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000)
+
     try {
+      if (!twoFAEnabled) {
+        const response = await fetch('/api/user/profile', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            action: 'change',
+            currentPassword: formData.currentPassword,
+            newPassword: formData.newPassword
+          }),
+          signal: controller.signal
+        })
+
+        const data = await response.json()
+
+        if (response.ok) {
+          setMessage({ type: 'success', text: data.message || 'Password updated successfully' })
+          setIsChangingPassword(false)
+          setFormData(prev => ({
+            ...prev,
+            currentPassword: '',
+            newPassword: '',
+            confirmPassword: ''
+          }))
+          setPasswordCode('')
+          setCodeSent(false)
+        } else {
+          setMessage({ type: 'error', text: data.error || 'Failed to update password' })
+        }
+        return
+      }
       const response = await fetch('/api/user/profile', {
-        method: 'PUT',
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
+          action: 'password_change_request',
           currentPassword: formData.currentPassword,
           newPassword: formData.newPassword
-        })
+        }),
+        signal: controller.signal
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        setMessage({ type: 'success', text: 'Password updated successfully' })
+        setCodeSent(true)
+        setMessage({ type: 'success', text: data.message || 'Verification code sent to your email' })
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to send verification code' })
+      }
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        setMessage({ type: 'error', text: 'Request timed out. Try again.' })
+      } else {
+        setMessage({ type: 'error', text: 'Failed to send verification code' })
+      }
+    } finally {
+      clearTimeout(timer)
+      setRequestingCode(false)
+    }
+  }
+
+  const handleConfirmPasswordChange = async () => {
+    if (!codeSent) {
+      setMessage({ type: 'error', text: 'Request a verification code first' })
+      return
+    }
+    if (!passwordCode.trim()) {
+      setMessage({ type: 'error', text: 'Enter the verification code' })
+      return
+    }
+    setConfirmingChange(true)
+    setMessage(null)
+    try {
+      const response = await fetch('/api/user/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ action: 'password_change_confirm', code: passwordCode })
+      })
+      const data = await response.json()
+      if (response.ok) {
+        setMessage({ type: 'success', text: data.message || 'Password updated successfully' })
         setIsChangingPassword(false)
         setFormData(prev => ({
           ...prev,
@@ -161,13 +240,15 @@ export default function ProfilePage() {
           newPassword: '',
           confirmPassword: ''
         }))
+        setPasswordCode('')
+        setCodeSent(false)
       } else {
         setMessage({ type: 'error', text: data.error || 'Failed to update password' })
       }
-    } catch (error) {
+    } catch (e) {
       setMessage({ type: 'error', text: 'Failed to update password' })
     } finally {
-      setLoading(false)
+      setConfirmingChange(false)
     }
   }
 
@@ -214,21 +295,24 @@ export default function ProfilePage() {
   const handleToggle2FA = async (enabled: boolean) => {
     setMessage(null)
     if (enabled) {
-      try {
-        const res = await fetch('/api/user/2fa', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ action: 'init' })
-        })
-        const data = await res.json()
-        if (res.ok) {
-          setTwoFAQr(data.qr)
-          setTwoFAVisible(true)
-        } else {
-          setMessage({ type: 'error', text: data.error || 'Failed to start 2FA setup' })
+      setTwoFAVisible(true)
+      setModalMessage(null)
+      if (twoFAMethod === 'totp') {
+        try {
+          const res = await fetch('/api/user/2fa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ action: 'init' })
+          })
+          const data = await res.json()
+          if (res.ok) {
+            setTwoFAQr(data.qr)
+          } else {
+            setModalMessage({ type: 'error', text: data.error || 'Failed to start 2FA setup' })
+          }
+        } catch {
+          setModalMessage({ type: 'error', text: 'Failed to start 2FA setup' })
         }
-      } catch {
-        setMessage({ type: 'error', text: 'Failed to start 2FA setup' })
       }
     } else {
       try {
@@ -251,11 +335,12 @@ export default function ProfilePage() {
   }
 
   const handleVerify2FA = async () => {
+    setModalMessage(null)
     try {
       const res = await fetch('/api/user/2fa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ action: 'verify', code: twoFACode })
+        body: JSON.stringify({ action: twoFAMethod === 'totp' ? 'verify' : 'email-verify', code: twoFACode })
       })
       const data = await res.json()
       if (res.ok) {
@@ -264,10 +349,10 @@ export default function ProfilePage() {
         setTwoFAEnabled(true)
         setMessage({ type: 'success', text: 'Two-factor authentication enabled' })
       } else {
-        setMessage({ type: 'error', text: data.error || 'Invalid code' })
+        setModalMessage({ type: 'error', text: data.error || 'Invalid code' })
       }
     } catch {
-      setMessage({ type: 'error', text: 'Failed to verify 2FA' })
+      setModalMessage({ type: 'error', text: 'Failed to verify 2FA' })
     }
   }
 
@@ -463,29 +548,71 @@ export default function ProfilePage() {
                       placeholder="Confirm new password"
                     />
                   </div>
-                  <div className="flex items-center space-x-2 pt-2">
-                    <button
-                      onClick={handleChangePassword}
-                      disabled={loading || isCurrentPasswordValid !== true || !formData.newPassword || (formData.newPassword !== formData.confirmPassword)}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                    >
-                      {loading ? 'Updating...' : 'Update Password'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsChangingPassword(false)
-                        setFormData(prev => ({
-                          ...prev,
-                          currentPassword: '',
-                          newPassword: '',
-                          confirmPassword: ''
-                        }))
-                      }}
-                      className="px-4 py-2 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                  {!codeSent ? (
+                    <div className="flex items-center space-x-2 pt-2">
+                      <button
+                        onClick={handleChangePassword}
+                        disabled={requestingCode || isCurrentPasswordValid !== true || !formData.newPassword || (formData.newPassword !== formData.confirmPassword)}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                      >
+                        {twoFAEnabled ? (requestingCode ? 'Sending...' : 'Send verification code') : (requestingCode ? 'Updating...' : 'Change password')}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsChangingPassword(false)
+                          setFormData(prev => ({
+                            ...prev,
+                            currentPassword: '',
+                            newPassword: '',
+                            confirmPassword: ''
+                          }))
+                          setPasswordCode('')
+                          setCodeSent(false)
+                        }}
+                        className="px-4 py-2 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 pt-2">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Verification Code</label>
+                        <input
+                          type="text"
+                          value={passwordCode}
+                          onChange={(e) => setPasswordCode(e.target.value)}
+                          className="w-full border-slate-200 dark:border-slate-700 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                          placeholder="Enter the code sent to your email"
+                        />
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={handleConfirmPasswordChange}
+                          disabled={confirmingChange || !passwordCode.trim()}
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                        >
+                          {confirmingChange ? 'Confirming...' : 'Confirm change'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setIsChangingPassword(false)
+                            setFormData(prev => ({
+                              ...prev,
+                              currentPassword: '',
+                              newPassword: '',
+                              confirmPassword: ''
+                            }))
+                            setPasswordCode('')
+                            setCodeSent(false)
+                          }}
+                          className="px-4 py-2 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -616,11 +743,44 @@ export default function ProfilePage() {
                 <div className="flex items-center mb-4">
                   <QrCode className="h-5 w-5 mr-2 text-indigo-600 dark:text-indigo-400" />
                   <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Set up Two-Factor Authentication</h3>
-                </div>
-                <div className="space-y-4">
-                  <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                    <img src={twoFAQr} alt="Authenticator QR code" className="mx-auto" />
+              </div>
+              <div className="space-y-4">
+                {modalMessage && (
+                  <div className={`p-3 rounded-lg flex items-center border ${modalMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'}`}>
+                    {modalMessage.type === 'success' ? <CheckCircle className="h-4 w-4 mr-2" /> : <AlertCircle className="h-4 w-4 mr-2" />}
+                    <span className="text-sm">{modalMessage.text}</span>
                   </div>
+                )}
+                <div className="flex items-center justify-center gap-3">
+                    <button
+                      onClick={async () => {
+                        setTwoFAMethod('totp')
+                        try {
+                          const res = await fetch('/api/user/2fa', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ action: 'init' })
+                          })
+                          const data = await res.json()
+                          if (res.ok) setTwoFAQr(data.qr)
+                        } catch {}
+                      }}
+                      className={`px-3 py-1.5 rounded-lg border ${twoFAMethod === 'totp' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'}`}
+                    >
+                      Authenticator App
+                    </button>
+                    <button
+                      onClick={() => setTwoFAMethod('email')}
+                      className={`px-3 py-1.5 rounded-lg border ${twoFAMethod === 'email' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'}`}
+                    >
+                      Email Code
+                    </button>
+                  </div>
+                  {twoFAMethod === 'totp' && (
+                    <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                      <img src={twoFAQr} alt="Authenticator QR code" className="mx-auto" />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Enter 6-digit code</label>
                     <input
@@ -648,21 +808,26 @@ export default function ProfilePage() {
                     </button>
                   </div>
                   <div className="mt-2 text-center">
-                    <button
+                    {twoFAMethod === 'email' && (
+                      <button
                       onClick={async () => {
+                        setModalMessage(null)
                         try {
                           await fetch('/api/user/2fa', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ action: 'fallback', method: 'email' })
+                            body: JSON.stringify({ action: 'email-init' })
                           })
-                          setMessage({ type: 'success', text: 'Fallback code sent to email' })
-                        } catch {}
+                          setModalMessage({ type: 'success', text: 'Verification code sent to email' })
+                        } catch {
+                          setModalMessage({ type: 'error', text: 'Failed to send verification code' })
+                        }
                       }}
                       className="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline transition-colors"
                     >
-                      Send fallback code to email
+                      Send verification code to email
                     </button>
+                    )}
                   </div>
                 </div>
               </div>

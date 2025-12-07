@@ -23,7 +23,8 @@ import {
   Send,
   Loader2,
   RefreshCw,
-  Download
+  Download,
+  Bell
 } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { useAuth } from '@/components/auth-provider'
@@ -204,7 +205,8 @@ export function FeedbackSessionManager({
         startsAt: sessionData.startTime,
         endsAt: sessionData.endTime,
         allowSelfFeedback: sessionData.allowSelfFeedback === true,
-        allowAnonymousFeedback: sessionData.settings?.allowAnonymous ?? true
+        allowAnonymousFeedback: sessionData.settings?.allowAnonymous ?? true,
+        notifyOnCreate: sessionData.notifyOnCreate === true
       })
 
       if ((response as any)?.session) {
@@ -1046,17 +1048,45 @@ interface SessionFormProps {
 }
 
 export function SessionForm({ session, groupMembers, onClose, onSubmit }: SessionFormProps) {
-  const [formData, setFormData] = useState({
+  type SessionFormData = {
+    title: string
+    description: string
+    targetUsers: string[]
+    allowSelfFeedback: boolean
+    startTime?: Date
+    endTime?: Date
+    hasEndDate: boolean
+    notifyOnCreate: boolean
+    settings: {
+      allowAnonymous: boolean
+      minFeedbackLength: number
+      maxFeedbackLength: number
+      autoClose: boolean
+      reminderFrequency: 'none' | 'daily' | 'twice_daily'
+    }
+  }
+
+  const [formData, setFormData] = useState<SessionFormData>({
     title: session?.title || '',
     description: session?.description || '',
     targetUsers: session?.targetUsers?.map(u => u.id) || [],
     allowSelfFeedback: (session as any)?.allowSelfFeedback ?? true,
-    settings: session?.settings || {
+    startTime: (session as any)?.startTime ?? undefined,
+    endTime: (session as any)?.endTime ?? undefined,
+    hasEndDate: !!(session as any)?.endTime,
+    notifyOnCreate: false,
+    settings: session?.settings ? {
+      allowAnonymous: Boolean((session as any)?.settings?.allowAnonymous),
+      minFeedbackLength: (session as any)?.settings?.minFeedbackLength ?? 50,
+      maxFeedbackLength: (session as any)?.settings?.maxFeedbackLength ?? 2500,
+      autoClose: Boolean((session as any)?.settings?.autoClose ?? false),
+      reminderFrequency: (session as any)?.settings?.reminderFrequency ?? 'daily'
+    } : {
       allowAnonymous: true,
       minFeedbackLength: 50,
-      maxFeedbackLength: 500,
-      autoClose: true,
-      reminderFrequency: 'daily' as const
+      maxFeedbackLength: 2500,
+      autoClose: false,
+      reminderFrequency: 'daily'
     }
   })
 
@@ -1233,52 +1263,92 @@ export function SessionForm({ session, groupMembers, onClose, onSubmit }: Sessio
                 Session Settings
               </h4>
               <div className="space-y-4">
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="checkbox"
-                    id="allowSelfFeedback"
-                    checked={formData.allowSelfFeedback}
-                    onChange={(e) => setFormData(prev => ({
-                      ...prev,
-                      allowSelfFeedback: e.target.checked
-                    }))}
-                    className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
-                  />
-                  <label htmlFor="allowSelfFeedback" className="text-sm text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                    Allow self feedback
+                <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 rounded-xl">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+                      <Bell className="h-5 w-5 text-slate-400 dark:text-slate-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">Notify on Session Start</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Send invitations to selected participants</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={formData.notifyOnCreate}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        notifyOnCreate: e.target.checked
+                      }))}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/20 rounded-full peer peer-checked:bg-indigo-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-slate-300 dark:after:border-slate-600 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5 peer-checked:after:border-white shadow-sm" />
                   </label>
                 </div>
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="checkbox"
-                    id="allowAnonymous"
-                    checked={formData.settings.allowAnonymous}
-                    onChange={(e) => setFormData(prev => ({
-                      ...prev,
-                      settings: { ...prev.settings, allowAnonymous: e.target.checked }
-                    }))}
-                    className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
-                  />
-                  <label htmlFor="allowAnonymous" className="text-sm text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                    Allow anonymous feedback
+                <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 rounded-xl">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+                      <Users className="h-5 w-5 text-slate-400 dark:text-slate-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">Allow Anonymous Feedback</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Participants can submit without identity</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={formData.settings.allowAnonymous}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        settings: { ...prev.settings, allowAnonymous: e.target.checked }
+                      }))}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/20 rounded-full peer peer-checked:bg-indigo-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-slate-300 dark:after:border-slate-600 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5 peer-checked:after:border-white shadow-sm" />
                   </label>
                 </div>
 
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="checkbox"
-                    id="autoClose"
-                    checked={formData.settings.autoClose}
-                    onChange={(e) => setFormData(prev => ({
-                      ...prev,
-                      settings: { ...prev.settings, autoClose: e.target.checked }
-                    }))}
-                    className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
-                  />
-                  <label htmlFor="autoClose" className="text-sm text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                    Auto-close session when all feedback is received
+                <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 rounded-xl">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+                      <Calendar className="h-5 w-5 text-slate-400 dark:text-slate-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">End Date</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Automatically end session on selected date</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={formData.hasEndDate}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        hasEndDate: e.target.checked,
+                        endTime: e.target.checked ? (prev.endTime ?? new Date()) : undefined
+                      }))}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/20 rounded-full peer peer-checked:bg-indigo-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-slate-300 dark:after:border-slate-600 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5 peer-checked:after:border-white shadow-sm" />
                   </label>
                 </div>
+
+                {formData.hasEndDate && (
+                  <div className="pl-2">
+                    <input
+                      type="datetime-local"
+                      value={formData.endTime ? new Date(formData.endTime).toISOString().slice(0,16) : ''}
+                      min={new Date().toISOString().slice(0,16)}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        endTime: e.target.value ? new Date(e.target.value) : undefined
+                      }))}
+                      className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 hover:border-indigo-300 dark:hover:border-indigo-600 transition-all text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                )}
 
                 <div className="pt-2">
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">

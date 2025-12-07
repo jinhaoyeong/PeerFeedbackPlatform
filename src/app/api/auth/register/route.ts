@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { AuthService } from '@/lib/auth-service'
+import { NotificationService } from '@/lib/notifications'
 
 export const runtime = 'nodejs'
 
@@ -56,17 +57,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Rate limiting check
+    // Rate limiting check (disabled in development or when IP is unavailable)
     const ipAddress = request.headers.get('x-forwarded-for') ||
                      request.headers.get('x-real-ip') ||
                      'unknown'
 
-    const canProceed = await AuthService.checkRateLimit(
-      ipAddress,
-      'register',
-      5, // max 5 attempts
-      60 // per hour
-    )
+    const isDev = process.env.NODE_ENV !== 'production'
+    const skipRateLimit = isDev || ipAddress === 'unknown' || process.env.DISABLE_RATE_LIMIT === 'true'
+    const canProceed = skipRateLimit
+      ? true
+      : await AuthService.checkRateLimit(
+          ipAddress,
+          'register',
+          5, // max 5 attempts
+          60 // per hour
+        )
 
     if (!canProceed) {
       return NextResponse.json(
@@ -84,6 +89,16 @@ export async function POST(request: NextRequest) {
     })
 
     // Set HTTP-only cookie for better security
+    try {
+      await NotificationService.sendEmail(
+        user.id,
+        'Welcome to Peer Feedback Platform',
+        `Hi ${user.fullName}, your account was created successfully.`,
+        `<p>Hi ${user.fullName},</p><p>Your account was created successfully.</p><p>Welcome aboard!</p>`,
+        { force: true }
+      )
+    } catch {}
+
     const response = NextResponse.json({
       user,
       token,

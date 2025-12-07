@@ -27,7 +27,7 @@ interface SessionActionsDropdownProps {
   onUpdate: () => void
   onEdit: () => void
   onViewDetails: () => void
-  onViewAnalytics: () => void
+  onViewAnalytics: (sessionId: string) => void
 }
 
 export function SessionActionsDropdown({
@@ -43,6 +43,8 @@ export function SessionActionsDropdown({
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false)
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
   // Log session data when component mounts
   useEffect(() => {
@@ -72,7 +74,7 @@ export function SessionActionsDropdown({
           break
 
         case 'view-analytics':
-          onViewAnalytics()
+          onViewAnalytics(session.id)
           break
 
         case 'edit':
@@ -134,9 +136,7 @@ export function SessionActionsDropdown({
             alert('Only admins can close sessions')
             return
           }
-          if (confirm('Are you sure you want to close this session?')) {
-            await updateSessionStatus('CLOSED')
-          }
+          setConfirmCloseOpen(true)
           break
 
         case 'duplicate':
@@ -156,9 +156,7 @@ export function SessionActionsDropdown({
             alert('Only admins can delete sessions')
             return
           }
-          if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
-            await deleteSession()
-          }
+          setConfirmDeleteOpen(true)
           break
       }
     } catch (error: any) {
@@ -451,6 +449,68 @@ export function SessionActionsDropdown({
                   className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition"
                 >
                   Create Copy
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {confirmCloseOpen && createPortal(
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-xl transform transition-all animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Close Session</h2>
+              <button onClick={() => setConfirmCloseOpen(false)} className="p-2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-5">
+              <p className="text-slate-700 dark:text-slate-300">Are you sure you want to close "{session.title}"?</p>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setConfirmCloseOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => { setConfirmCloseOpen(false); await updateSessionStatus('CLOSED') }}
+                  className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 transition"
+                >
+                  Close Session
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {confirmDeleteOpen && createPortal(
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-xl transform transition-all animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Delete Session</h2>
+              <button onClick={() => setConfirmDeleteOpen(false)} className="p-2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-5">
+              <p className="text-slate-700 dark:text-slate-300">This will permanently delete "{session.title}" and its data. This action cannot be undone.</p>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setConfirmDeleteOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => { setConfirmDeleteOpen(false); await deleteSession() }}
+                  className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700 transition"
+                >
+                  Delete Session
                 </button>
               </div>
             </div>

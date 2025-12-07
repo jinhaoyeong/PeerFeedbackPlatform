@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import jwt from 'jsonwebtoken'
 import { AuthService } from '@/lib/auth-service'
 import bcrypt from 'bcryptjs'
+import { NotificationService } from '@/lib/notifications'
 
 function getUserFromToken(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
@@ -167,7 +168,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { action, currentPassword, newPassword } = body
+    const { action, currentPassword, newPassword, code } = body
 
     if (action === 'verify') {
       if (!currentPassword) {
@@ -185,6 +186,104 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Current password is incorrect' }, { status: 400 })
       }
       return NextResponse.json({ valid: true })
+    }
+
+    if (action === 'password_change_request') {
+      if (!currentPassword || !newPassword) {
+        return NextResponse.json({ error: 'Current and new password are required' }, { status: 400 })
+      }
+      const currentUser = await prisma.user.findUnique({
+        where: { id: user.userId },
+        select: { passwordHash: true, email: true, fullName: true, twoFAEnabled: true }
+      })
+      if (!currentUser) {
+        return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      }
+      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, currentUser.passwordHash)
+      if (!isCurrentPasswordValid) {
+        return NextResponse.json({ error: 'Current password is incorrect' }, { status: 400 })
+      }
+      if (String(newPassword).length < 8) {
+        return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 })
+      }
+      const hashedNewPassword = await bcrypt.hash(newPassword, 12)
+      if (!(currentUser as any)?.twoFAEnabled) {
+        await prisma.user.update({
+          where: { id: user.userId },
+          data: { passwordHash: hashedNewPassword }
+        })
+        await AuthService.logAuditEvent(user.userId, 'PASSWORD_CHANGED', 'User', user.userId, { method: '2fa_off' })
+        try {
+          await NotificationService.sendEmail(
+            user.userId,
+            'Your password was changed',
+            'Your account password was changed successfully.',
+            `<p>Your account password was changed successfully on ${new Date().toLocaleString()}.</p>`,
+            { force: true }
+          )
+        } catch {}
+        return NextResponse.json({ message: 'Password updated successfully' })
+      }
+      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString()
+      const codeHash = await bcrypt.hash(verificationCode, 10)
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+      await AuthService.logAuditEvent(user.userId, 'PASSWORD_CHANGE_REQUEST', 'User', user.userId, {
+        codeHash,
+        hashedNewPassword,
+        expiresAt: expiresAt.toISOString()
+      })
+      try {
+        await NotificationService.sendEmail(
+          user.userId,
+          'Password change verification code',
+          `Use this code to confirm your password change: ${verificationCode}`,
+          `<p>Use this code to confirm your password change:</p><h2>${verificationCode}</h2><p>This code expires at ${expiresAt.toLocaleString()}.</p>`
+        )
+      } catch (e) {
+        return NextResponse.json({ error: 'Failed to send verification email' }, { status: 500 })
+      }
+      return NextResponse.json({ message: 'Verification code sent to email' })
+    }
+
+    if (action === 'password_change_confirm') {
+      if (!code) {
+        return NextResponse.json({ error: 'Verification code is required' }, { status: 400 })
+      }
+      const latest = await prisma.auditLog.findFirst({
+        where: { userId: user.userId, action: 'PASSWORD_CHANGE_REQUEST' },
+        orderBy: { occurredAt: 'desc' }
+      })
+      let details: any = null
+      try { details = latest?.details ? JSON.parse(latest.details as string) : null } catch {}
+      const codeHash = details?.codeHash
+      const hashedNewPassword = details?.hashedNewPassword
+      const expiresAtStr = details?.expiresAt
+      if (!codeHash || !hashedNewPassword || !expiresAtStr) {
+        return NextResponse.json({ error: 'No password change request found' }, { status: 400 })
+      }
+      const expiresAt = new Date(expiresAtStr)
+      if (expiresAt.getTime() < Date.now()) {
+        return NextResponse.json({ error: 'Verification code expired' }, { status: 400 })
+      }
+      const ok = await bcrypt.compare(String(code), codeHash)
+      if (!ok) {
+        return NextResponse.json({ error: 'Invalid verification code' }, { status: 400 })
+      }
+      await prisma.user.update({
+        where: { id: user.userId },
+        data: { passwordHash: hashedNewPassword }
+      })
+      await AuthService.logAuditEvent(user.userId, 'PASSWORD_CHANGED', 'User', user.userId, { method: 'email_code' })
+      try {
+        await NotificationService.sendEmail(
+          user.userId,
+          'Your password was changed',
+          'Your account password was changed successfully.',
+          `<p>Your account password was changed successfully on ${new Date().toLocaleString()}.</p>`,
+          { force: true }
+        )
+      } catch {}
+      return NextResponse.json({ message: 'Password updated successfully' })
     }
 
     if (action === 'change') {
@@ -207,6 +306,15 @@ export async function POST(request: NextRequest) {
         where: { id: user.userId },
         data: { passwordHash: hashedNewPassword }
       })
+      try {
+        await NotificationService.sendEmail(
+          user.userId,
+          'Your password was changed',
+          'Your account password was changed successfully.',
+          `<p>Your account password was changed successfully on ${new Date().toLocaleString()}.</p>`,
+          { force: true }
+        )
+      } catch {}
       return NextResponse.json({ message: 'Password updated successfully' })
     }
 

@@ -54,8 +54,7 @@ export function GroupSettingsPopup({
   // Form states
   const [groupName, setGroupName] = useState(group.name)
   const [groupDescription, setGroupDescription] = useState(group.description || '')
-  const [groupIsActive, setGroupIsActive] = useState(group.isActive)
-  const [allowJoinCode, setAllowJoinCode] = useState(group.isActive)
+  const [allowJoinCode, setAllowJoinCode] = useState(!!group.joinCode)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
@@ -78,12 +77,11 @@ export function GroupSettingsPopup({
 
       const response = await apiClient.updateGroup(group.id, {
         name: groupName.trim(),
-        description: groupDescription.trim() || undefined,
-        isActive: groupIsActive
+        description: groupDescription.trim() || undefined
       })
 
       if (response) {
-        onUpdate({ ...response, isActive: groupIsActive })
+        onUpdate({ ...response })
         setSuccess('Settings updated successfully!')
         setTimeout(() => setSuccess(null), 3000)
       }
@@ -214,20 +212,6 @@ export function GroupSettingsPopup({
 
   const handleJoinCodeToggle = async (enabled: boolean) => {
     setAllowJoinCode(enabled)
-    // When join code is disabled, also set group to inactive
-    if (!enabled) {
-      setGroupIsActive(false)
-      try {
-        await apiClient.updateGroup(group.id, {
-          isActive: false
-        })
-        onUpdate({ ...group, isActive: false })
-        setSuccess('Join code disabled and group set to inactive')
-        setTimeout(() => setSuccess(null), 3000)
-      } catch (e: any) {
-        setError(e?.message || 'Failed to update group status')
-      }
-    }
   }
 
   if (!isOpen) return null
@@ -340,26 +324,6 @@ export function GroupSettingsPopup({
 
                 {isAdmin && (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700">
-                      <div>
-                        <p className="text-sm font-medium text-slate-900 dark:text-white">Group Status</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                          {groupIsActive
-                            ? 'Group is active and accepting new members'
-                            : 'Group is inactive and not accepting new members'
-                          }
-                        </p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          className="sr-only peer"
-                          checked={groupIsActive}
-                          onChange={(e) => setGroupIsActive(e.target.checked)}
-                        />
-                        <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/20 rounded-full peer peer-checked:bg-indigo-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-slate-300 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5 peer-checked:after:border-white shadow-sm" />
-                      </label>
-                    </div>
 
                     <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700">
                       <div>

@@ -5,6 +5,7 @@ import { useAuth } from '@/components/auth-provider'
 import { useSettings } from '@/components/settings-provider'
 import { Settings, Bell, Moon, Sun, Globe, Check, AlertCircle, Download, ArrowLeft } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 
 interface UserSettings {
   emailNotifications: boolean
@@ -39,13 +40,32 @@ export default function SettingsPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [originalSettings, setOriginalSettings] = useState<UserSettings | null>(null)
   const isDirty = JSON.stringify(settings) !== JSON.stringify(originalSettings)
+  const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false)
 
   useEffect(() => {
-    if (user) {
+    if (user && token) {
       fetchSettings()
-      
-  }
-  }, [user])
+    } else {
+      try {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem('user-settings') : null
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          const s = {
+            emailNotifications: !!parsed.emailNotifications,
+            darkMode: !!parsed.darkMode,
+            language: String(parsed.language || 'en'),
+            timezone: String(parsed.timezone || 'UTC'),
+            allowAnonymousFeedback: !!parsed.allowAnonymousFeedback,
+            showInGroupDirectory: !!parsed.showInGroupDirectory,
+            allowMessaging: typeof parsed.allowMessaging === 'undefined' ? true : !!parsed.allowMessaging,
+            pushNotifications: !!parsed.pushNotifications
+          }
+          setSettings(s)
+          setOriginalSettings(s)
+        }
+      } catch {}
+    }
+  }, [user, token])
 
   const fetchSettings = async () => {
     try {
@@ -60,9 +80,46 @@ export default function SettingsPage() {
         const data = await response.json()
         setSettings(data.settings)
         setOriginalSettings(data.settings)
+      } else {
+        try {
+          const raw = typeof window !== 'undefined' ? localStorage.getItem('user-settings') : null
+          if (raw) {
+            const parsed = JSON.parse(raw)
+            const s = {
+              emailNotifications: !!parsed.emailNotifications,
+              darkMode: !!parsed.darkMode,
+              language: String(parsed.language || 'en'),
+              timezone: String(parsed.timezone || 'UTC'),
+              allowAnonymousFeedback: !!parsed.allowAnonymousFeedback,
+              showInGroupDirectory: !!parsed.showInGroupDirectory,
+              allowMessaging: typeof parsed.allowMessaging === 'undefined' ? true : !!parsed.allowMessaging,
+              pushNotifications: !!parsed.pushNotifications
+            }
+            setSettings(s)
+            setOriginalSettings(s)
+          }
+        } catch {}
       }
     } catch (error) {
       console.error('Error fetching settings:', error)
+      try {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem('user-settings') : null
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          const s = {
+            emailNotifications: !!parsed.emailNotifications,
+            darkMode: !!parsed.darkMode,
+            language: String(parsed.language || 'en'),
+            timezone: String(parsed.timezone || 'UTC'),
+            allowAnonymousFeedback: !!parsed.allowAnonymousFeedback,
+            showInGroupDirectory: !!parsed.showInGroupDirectory,
+            allowMessaging: typeof parsed.allowMessaging === 'undefined' ? true : !!parsed.allowMessaging,
+            pushNotifications: !!parsed.pushNotifications
+          }
+          setSettings(s)
+          setOriginalSettings(s)
+        }
+      } catch {}
       setMessage({ type: 'error', text: 'Failed to load settings' })
     } finally {
       setLoading(false)
@@ -148,8 +205,8 @@ export default function SettingsPage() {
           <button
             onClick={() => {
               if (isDirty) {
-                const ok = confirm('You have unsaved changes. Exit without saving?')
-                if (!ok) return
+                setShowUnsavedConfirm(true)
+                return
               }
               if (typeof window !== 'undefined' && window.history.length > 1) {
                 router.back()
@@ -227,7 +284,7 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="font-medium text-slate-900 dark:text-white">Email Notifications</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">Receive notifications via email</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Receive email for system and session updates. Login alerts are controlled in Privacy & Security.</div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -357,7 +414,32 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        
+        <AlertDialog open={showUnsavedConfirm} onOpenChange={setShowUnsavedConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
+              <AlertDialogDescription>
+                You have unsaved changes. Exit without saving?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setShowUnsavedConfirm(false)
+                  if (typeof window !== 'undefined' && window.history.length > 1) {
+                    router.back()
+                  } else {
+                    router.push('/dashboard')
+                  }
+                }}
+              >
+                Discard Changes
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
       </div>
     </div>
   );

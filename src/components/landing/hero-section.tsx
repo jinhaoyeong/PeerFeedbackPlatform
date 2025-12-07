@@ -44,65 +44,49 @@ export function HeroSection() {
   }
 
   return (
-    <section className="relative pt-32 pb-20 px-6 overflow-hidden bg-white dark:bg-slate-950">
-      <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
+    <section className="relative py-32 px-6 overflow-hidden z-10">
+      <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
         {/* Left Column: Text Content */}
         <motion.div 
           className="text-left relative z-10"
           initial="hidden"
-          animate="visible"
+          whileInView="visible"
+          viewport={{ once: true }}
           variants={containerVariants}
         >
-          {/* Badge */}
-          <motion.div variants={itemVariants} className="flex mb-8">
-            <div className="inline-flex items-center bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-4 py-1.5 rounded-md text-sm font-semibold border border-blue-100 dark:border-blue-800">
-              <span className="w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full mr-2 animate-pulse"></span>
-              Safe & Anonymous Feedback
-            </div>
-          </motion.div>
-
           {/* Main heading */}
-          <motion.h1 variants={itemVariants} className="text-5xl md:text-7xl font-extrabold text-slate-900 dark:text-white mb-6 leading-tight tracking-tight">
+          <motion.h2 variants={itemVariants} className="text-5xl md:text-6xl font-extrabold text-slate-900 dark:text-white mb-8 leading-tight tracking-tight">
             Say hello to <br />
             <span className="text-blue-600 dark:text-blue-500">
               Peer Feedback
             </span>
-          </motion.h1>
+          </motion.h2>
 
           {/* Subheading */}
-          <motion.p variants={itemVariants} className="text-xl text-slate-600 dark:text-slate-400 mb-10 max-w-2xl leading-relaxed">
+          <motion.p variants={itemVariants} className="text-xl text-slate-600 dark:text-slate-400 mb-10 max-w-xl leading-relaxed">
             An open source design system built for personal growth. 
             Give and receive constructive feedback in a safe, anonymous environment.
           </motion.p>
 
-          {/* Call-to-action buttons */}
-          <motion.div variants={itemVariants} className="flex flex-wrap gap-4 mb-16">
-            <a
-              href="#auth"
-              onMouseEnter={() => setIsHovered(true)}
-              onMouseLeave={() => setIsHovered(false)}
-              className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-bold transition-all duration-200 shadow-lg shadow-blue-600/20 hover:shadow-blue-600/40 hover:-translate-y-0.5"
-            >
-              Start giving feedback
-            </a>
-
-            <a
-              href="#features"
-              className="px-8 py-4 bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 rounded-md font-bold border-2 border-blue-100 dark:border-blue-900 hover:border-blue-600 dark:hover:border-blue-500 transition-all duration-200 hover:-translate-y-0.5"
-            >
-              Start developing
-            </a>
-          </motion.div>
-
           {/* Trust indicators */}
-          <motion.div variants={itemVariants} className="flex flex-wrap gap-8 text-sm text-slate-500 dark:text-slate-400 font-medium">
-             <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <span>100% Anonymous</span>
+          <motion.div variants={itemVariants} className="flex flex-col gap-4 text-sm text-slate-600 dark:text-slate-400 font-medium">
+             <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <span>100% Anonymous & Secure</span>
              </div>
-             <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <span>Privacy First</span>
+             <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <span>Privacy First Architecture</span>
+             </div>
+             <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <span>Structured Feedback Analysis</span>
              </div>
           </motion.div>
         </motion.div>

@@ -85,8 +85,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const updateStatus = () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         setSyncStatus('offline')
+        setFeatures(f => ({ ...f, twoFAAvailable: false }))
       } else if (syncStatus === 'offline') {
         setSyncStatus('idle')
+        setFeatures(f => ({ ...f, twoFAAvailable: true }))
         processPendingQueue()
       }
     }
@@ -111,6 +113,35 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       } catch {}
     }
     fetchFeatures()
+  }, [token])
+
+  useEffect(() => {
+    const loadFromServer = async () => {
+      if (!token) return
+      try {
+        const res = await fetch('/api/user/settings', { headers: { 'Authorization': `Bearer ${token}` } })
+        if (res.ok) {
+          const data = await res.json()
+          const s = migrateSettings(data.settings || {})
+          const v = Number(data.version || 1)
+          setVersion(v)
+          if (s.language) setLanguage(String(s.language))
+          if (s.timezone) setTimezone(String(s.timezone))
+          try {
+            const root = document.documentElement
+            if (s.darkMode) root.classList.add('dark')
+            else root.classList.remove('dark')
+          } catch {}
+          try {
+            const current = typeof window !== 'undefined' ? localStorage.getItem('user-settings') : null
+            const base = current ? JSON.parse(current) : {}
+            const merged = migrateSettings({ ...base, ...s, version: v })
+            localStorage.setItem('user-settings', JSON.stringify(merged))
+          } catch {}
+        }
+      } catch {}
+    }
+    loadFromServer()
   }, [token])
 
   useEffect(() => {

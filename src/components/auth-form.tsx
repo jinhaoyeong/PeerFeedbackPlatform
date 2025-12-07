@@ -31,6 +31,13 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [twoFACode, setTwoFACode] = useState('')
+  const [forgotOpen, setForgotOpen] = useState(false)
+  const [forgotCodeSent, setForgotCodeSent] = useState(false)
+  const [forgotCode, setForgotCode] = useState('')
+  const [forgotNewPassword, setForgotNewPassword] = useState('')
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('')
+  const [forgotSubmitting, setForgotSubmitting] = useState(false)
+  const [forgotMessage, setForgotMessage] = useState<string | null>(null)
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -128,7 +135,84 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
   const toggleMode = () => {
     setErrors({})
     setFormData({ email: '', password: '', confirmPassword: '', username: '', fullName: '' })
+    setForgotOpen(false)
+    setForgotCodeSent(false)
+    setForgotCode('')
+    setForgotNewPassword('')
+    setForgotConfirmPassword('')
+    setForgotMessage(null)
     onModeChange(mode === 'login' ? 'register' : 'login')
+  }
+
+  const handleSendResetCode = async () => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!formData.email || !emailRegex.test(formData.email)) {
+      setErrors(prev => ({ ...prev, email: 'Please enter a valid email address' }))
+      return
+    }
+    setForgotSubmitting(true)
+    setForgotMessage(null)
+    try {
+      const response = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'request', email: formData.email })
+      })
+      const data = await response.json()
+      if (response.ok) {
+        setForgotCodeSent(true)
+        setForgotMessage(data.message || 'Verification code sent to your email')
+      } else {
+        setForgotMessage(data.message || 'Failed to send verification code')
+      }
+    } catch (e) {
+      setForgotMessage('Failed to send verification code')
+    } finally {
+      setForgotSubmitting(false)
+    }
+  }
+
+  const handleResetPassword = async () => {
+    if (!forgotCode.trim()) {
+      setForgotMessage('Enter the verification code')
+      return
+    }
+    if (!forgotNewPassword) {
+      setForgotMessage('Enter a new password')
+      return
+    }
+    if (forgotNewPassword.length < 8 || !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(forgotNewPassword)) {
+      setForgotMessage('Password must contain uppercase, lowercase, and numbers')
+      return
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setForgotMessage('New passwords do not match')
+      return
+    }
+    setForgotSubmitting(true)
+    setForgotMessage(null)
+    try {
+      const response = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'confirm', email: formData.email, code: forgotCode.trim(), newPassword: forgotNewPassword })
+      })
+      const data = await response.json()
+      if (response.ok) {
+        setForgotMessage(data.message || 'Password updated successfully')
+        setForgotOpen(false)
+        setForgotCodeSent(false)
+        setForgotCode('')
+        setForgotNewPassword('')
+        setForgotConfirmPassword('')
+      } else {
+        setForgotMessage(data.message || 'Failed to reset password')
+      }
+    } catch (e) {
+      setForgotMessage('Failed to reset password')
+    } finally {
+      setForgotSubmitting(false)
+    }
   }
 
   return (
@@ -402,7 +486,125 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
               {mode === 'login' ? 'Sign up' : 'Sign in'}
             </button>
           </p>
+          {mode === 'login' && !twoFATempToken && (
+            <p className="mt-2 text-sm">
+              <button
+                type="button"
+                onClick={() => setForgotOpen(!forgotOpen)}
+                className="text-blue-600 dark:text-indigo-400 hover:text-blue-700 dark:hover:text-indigo-300 hover:underline"
+              >
+                {forgotOpen ? 'Close forgot password' : 'Forgot password?'}
+              </button>
+            </p>
+          )}
         </div>
+
+        {mode === 'login' && forgotOpen && (
+          <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-xl">
+            <div>
+              <label htmlFor="forgot-email" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                <input
+                  id="forgot-email"
+                  name="forgot-email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                  className="w-full pl-10 pr-3 py-2 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600"
+                  placeholder="you@example.com"
+                  disabled={forgotSubmitting}
+                />
+              </div>
+            </div>
+
+            <div className="mt-3">
+              {!forgotCodeSent ? (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={handleSendResetCode}
+                    disabled={forgotSubmitting}
+                    className="px-4 py-2 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    {forgotSubmitting ? 'Sending...' : 'Send reset code'}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label htmlFor="forgot-code" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Verification Code</label>
+                    <div className="relative">
+                      <Shield className="absolute left-3 top-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                      <input
+                        id="forgot-code"
+                        name="forgot-code"
+                        type="text"
+                        value={forgotCode}
+                        onChange={(e) => setForgotCode(e.target.value)}
+                        className="w-full pl-10 pr-3 py-2 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600"
+                        placeholder="6-digit code"
+                        disabled={forgotSubmitting}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="forgot-new" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">New Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                      <input
+                        id="forgot-new"
+                        name="forgot-new"
+                        type="password"
+                        value={forgotNewPassword}
+                        onChange={(e) => setForgotNewPassword(e.target.value)}
+                        className="w-full pl-10 pr-3 py-2 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600"
+                        placeholder="••••••••"
+                        disabled={forgotSubmitting}
+                      />
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Must contain uppercase, lowercase, and numbers</p>
+                  </div>
+                  <div>
+                    <label htmlFor="forgot-confirm" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Confirm Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                      <input
+                        id="forgot-confirm"
+                        name="forgot-confirm"
+                        type="password"
+                        value={forgotConfirmPassword}
+                        onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                        className="w-full pl-10 pr-3 py-2 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600"
+                        placeholder="••••••••"
+                        disabled={forgotSubmitting}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-center">
+                    <button
+                      type="button"
+                      onClick={handleResetPassword}
+                      disabled={forgotSubmitting}
+                      className="px-4 py-2 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+                    >
+                      {forgotSubmitting ? 'Resetting...' : 'Reset password'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {forgotMessage && (
+              <div className="mt-3 bg-blue-50 dark:bg-indigo-900/20 border border-blue-100 dark:border-indigo-800 rounded-xl p-3">
+                <p className="text-sm text-blue-900 dark:text-indigo-300 flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-2" />
+                  {forgotMessage}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Privacy notice */}
         <div className="mt-8 p-4 bg-blue-50 dark:bg-indigo-900/20 border border-blue-100 dark:border-indigo-800 rounded-xl">

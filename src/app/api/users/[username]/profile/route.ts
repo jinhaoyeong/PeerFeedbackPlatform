@@ -1,22 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import jwt from 'jsonwebtoken'
-
-function getUserFromToken(request: NextRequest) {
-  const authHeader = request.headers.get('authorization')
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null
-  }
-
-  const token = authHeader.substring(7)
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any
-    return decoded
-  } catch (error) {
-    return null
-  }
-}
+import { getUserFromRequest } from '@/lib/middleware'
 
 export async function GET(
   request: NextRequest,
@@ -24,26 +8,25 @@ export async function GET(
 ) {
   try {
     const { username } = await params
-    const viewer = getUserFromToken(request)
-    const viewerId = viewer?.userId
+    const viewer = await getUserFromRequest(request)
+    const viewerId = viewer?.id
 
     // Find target user
-    const targetUser = await prisma.user.findFirst({
-      where: {
-        username: {
-          equals: username,
-        }
-      },
-      include: {
-        _count: {
-          select: {
-            feedbackSubmissions: true, // feedbackGiven
-            createdGroups: true,
-            groupMemberships: true
-          }
+  const targetUser = await prisma.user.findFirst({
+    where: {
+      username: {
+        equals: username,
+      }
+    },
+    include: {
+      _count: {
+        select: {
+          createdGroups: true,
+          groupMemberships: true
         }
       }
-    })
+    }
+  })
 
     if (!targetUser) {
       return NextResponse.json(
@@ -73,19 +56,17 @@ export async function GET(
     } else if (profileVisibility === 'public') {
       canView = true
     } else if (profileVisibility === 'group-members' && viewerId) {
-      // Check for shared groups
-      const sharedGroup = await prisma.groupMember.findFirst({
+      const targetGroups = await prisma.groupMember.findMany({
+        where: { userId: targetUser.id },
+        select: { groupId: true }
+      })
+      const targetGroupIds = targetGroups.map((g: { groupId: string }) => g.groupId)
+      const sharedGroup = targetGroupIds.length > 0 ? await prisma.groupMember.findFirst({
         where: {
           userId: viewerId,
-          group: {
-            members: {
-              some: {
-                userId: targetUser.id
-              }
-            }
-          }
+          groupId: { in: targetGroupIds }
         }
-      })
+      }) : null
       if (sharedGroup) {
         canView = true
       }

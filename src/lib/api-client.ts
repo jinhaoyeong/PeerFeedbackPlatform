@@ -177,6 +177,7 @@ class ApiClient {
     endsAt?: Date
     allowSelfFeedback?: boolean
     allowAnonymousFeedback?: boolean
+    notifyOnCreate?: boolean
   }) {
     return this.request('/feedback/sessions', {
       method: 'POST',
@@ -199,6 +200,23 @@ class ApiClient {
     return this.request(`/feedback/sessions/${sessionId}`, {
       method: 'PUT',
       body: JSON.stringify({ status }),
+    })
+  }
+
+  async updateSession(sessionId: string, data: {
+    title?: string
+    description?: string
+    startsAt?: Date
+    endsAt?: Date
+    allowSelfFeedback?: boolean
+    allowAnonymousFeedback?: boolean
+  }) {
+    if (!sessionId) {
+      throw new Error('Session ID is required')
+    }
+    return this.request(`/feedback/sessions/${sessionId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
     })
   }
 
@@ -242,6 +260,12 @@ class ApiClient {
 
   async getAnalyticsData(timeRange: 'week' | 'month' | 'quarter' | 'year' = 'month') {
     return this.request(`/analytics?type=analytics&timeRange=${timeRange}`, {
+      method: 'GET',
+    })
+  }
+
+  async getSessionAnalytics(sessionId: string) {
+    return this.request(`/feedback/sessions/${sessionId}/analytics`, {
       method: 'GET',
     })
   }

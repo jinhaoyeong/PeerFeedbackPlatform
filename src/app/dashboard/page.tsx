@@ -29,7 +29,7 @@ import {
   Bell,
   Loader2
 } from 'lucide-react'
-import { FeedbackReceivedIcon, FeedbackGivenIcon, ActiveGroupsIcon, AverageSentimentIcon } from '@/components/custom-icons'
+import { FeedbackReceivedIcon, ActiveGroupsIcon } from '@/components/custom-icons'
 import { useToast } from '@/components/hooks/use-toast'
 
 interface DashboardStats {
@@ -350,35 +350,7 @@ export default function DashboardPage() {
     return () => window.removeEventListener('groups:refresh', handler as any)
   }, [])
 
-  const getActivityIcon = (type: string) => {
-    switch (type) {
-      case 'feedback_received':
-        return <MessageSquare className="h-4 w-4 text-blue-600" />
-      case 'feedback_given':
-        return <Star className="h-4 w-4 text-green-600" />
-      case 'group_joined':
-        return <Users className="h-4 w-4 text-purple-600" />
-      case 'session_created':
-        return <Plus className="h-4 w-4 text-indigo-600" />
-      default:
-        return <AlertCircle className="h-4 w-4 text-slate-400" />
-    }
-  }
-
-  const getSentimentColor = (sentiment: string) => {
-    switch (sentiment) {
-      case 'VERY_POSITIVE':
-      case 'POSITIVE':
-        return 'text-green-700 bg-green-50 border border-green-200'
-      case 'NEUTRAL':
-        return 'text-amber-700 bg-amber-50 border border-amber-200'
-      case 'NEGATIVE':
-      case 'VERY_NEGATIVE':
-        return 'text-red-700 bg-red-50 border border-red-200'
-      default:
-        return 'text-slate-600 bg-slate-100 border border-slate-200'
-    }
-  }
+  
 
   if (showGroupDetails && selectedGroup) {
     return (
@@ -413,7 +385,7 @@ export default function DashboardPage() {
           </div>
         </header>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <FeedbackAnalyticsReal timeRange="month" />
+          <FeedbackAnalyticsReal />
         </div>
       </div>
     )
@@ -472,8 +444,17 @@ export default function DashboardPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Welcome Section */}
         <div className="mb-10">
-          <h2 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-3 tracking-tight">
-            Welcome back, {user?.fullName}! 👋
+          <h2 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-3 tracking-tight flex items-center gap-3">
+            Welcome back, {user?.fullName}! 
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" className="h-10 w-10 text-blue-600 dark:text-blue-400">
+              <rect width="256" height="256" fill="none"/>
+              <path d="M213.27,104,196,74a20,20,0,0,0-34.64,20l-30-52A20,20,0,0,0,96.65,62h0L89.73,50A20,20,0,0,0,55.08,70L69.32,94.67a20,20,0,0,0-34.64,20L74.7,184a80,80,0,0,0,138.57-80Z" opacity="0.2" fill="currentColor"/>
+              <path d="M96.65,62a20,20,0,0,1,34.64-20l30,52" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"/>
+              <path d="M69.32,94.67,55.08,70A20,20,0,0,1,89.73,50l31.17,54" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"/>
+              <path d="M158.87,160A40,40,0,0,1,168,105.58L161.32,94A20,20,0,0,1,196,74l17.31,30A80,80,0,0,1,74.7,184l-40-69.32a20,20,0,0,1,34.64-20L88.57,128" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"/>
+              <path d="M192,33.78A51.84,51.84,0,0,1,223.67,58l.33.57" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"/>
+              <path d="M74.62,232A111.88,111.88,0,0,1,47,200" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"/>
+            </svg>
           </h2>
           <p className="text-slate-500 dark:text-slate-400 text-xl">
             Here's what's happening with your feedback journey.
@@ -481,7 +462,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid md:grid-cols-4 gap-6 mb-10">
+        <div className="grid md:grid-cols-3 gap-6 mb-10">
           <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
             <div className="flex items-center justify-between mb-4">
               <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
@@ -494,9 +475,6 @@ export default function DashboardPage() {
 
           <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
             <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
-                <FeedbackGivenIcon className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-              </div>
               <span className="text-3xl font-bold text-slate-900 dark:text-white">{stats.totalFeedbackGiven}</span>
             </div>
             <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Feedback Given</p>
@@ -512,17 +490,7 @@ export default function DashboardPage() {
             <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Active Groups</p>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
-                <AverageSentimentIcon className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-              </div>
-              <span className={`px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wide ${getSentimentColor(stats.averageSentiment)}`}>
-                {stats.averageSentiment}
-              </span>
-            </div>
-            <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Average Sentiment</p>
-          </div>
+          
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
@@ -545,7 +513,7 @@ export default function DashboardPage() {
                         setModalMode('create')
                         setShowModal(true)
                       }}
-                      className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 dark:shadow-indigo-900/20 font-medium"
+                      className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md shadow-blue-200 dark:shadow-blue-900/20 font-medium"
                     >
                       <Plus className="h-4 w-4" />
                       <span>Create Group</span>
@@ -645,22 +613,32 @@ export default function DashboardPage() {
                     <p>No recent activity</p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {(showAllActivity ? stats.recentActivity : stats.recentActivity.slice(0, 5))
+                  <div className="space-y-0">
+                    {stats.recentActivity
                       .filter((a, i, arr) => arr.findIndex(b => b.id === a.id) === i)
-                      .map((activity, idx) => (
-                      <div key={`${activity.id}:${idx}`} className="flex items-start space-x-3">
-                        <div className="flex-shrink-0 mt-0.5">
-                          {getActivityIcon(activity.type)}
+                      .slice(0, showAllActivity ? 8 : 3)
+                      .map((activity, idx, arr) => (
+                      <div key={`${activity.id}:${idx}`} className="flex gap-4 relative pb-8 last:pb-0">
+                        {/* Dot + Timeline Line */}
+                        <div className="flex-shrink-0 mt-1.5 relative z-10 w-4 flex flex-col items-center">
+                          <div className="w-2.5 h-2.5 rounded-full bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.5)] ring-4 ring-white dark:ring-slate-900" />
+                          {idx !== arr.length - 1 && (
+                            <div className="absolute left-1/2 -translate-x-1/2 top-3 bottom-0 w-[2px] bg-slate-100 dark:bg-slate-800" />
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 border border-slate-100 dark:border-slate-800">
                           <p className="text-sm font-medium text-slate-900 dark:text-white">{activity.message}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{activity.timestamp}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1.5">
+                            <Calendar className="h-3 w-3" />
+                            {activity.timestamp}
+                          </p>
                         </div>
                       </div>
                     ))}
-                    {stats.recentActivity.length > 5 && (
-                      <div className="pt-2">
+                    {stats.recentActivity.length > 3 && (
+                      <div className="pt-4">
                         <button
                           onClick={() => setShowAllActivity(!showAllActivity)}
                           className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors"

@@ -5,6 +5,9 @@ import { prisma } from './prisma'
 import { AuthService } from './auth-service'
 
 const sentiment = new Sentiment()
+const HF_MODEL = process.env.HF_SENTIMENT_MODEL || 'cardiffnlp/twitter-roberta-base-sentiment-latest'
+const HF_ENDPOINT = process.env.HF_API_URL || `https://api-inference.huggingface.co/models/${HF_MODEL}`
+const HF_TOKEN = process.env.HUGGING_FACE_API_TOKEN || process.env.HF_TOKEN || ''
 
 export interface CreateSessionData {
   groupId: string
@@ -67,58 +70,81 @@ export class FeedbackService {
     return crypto.createHash('sha256').update(combined).digest('hex')
   }
 
-  static analyzeSentiment(content: string): { score: number; sentiment: string } {
-    const result = sentiment.analyze(content)
-
-    let sentimentLevel: string
+  static async analyzeSentiment(content: string): Promise<{ score: number; sentiment: string }> {
+    const text = String(content || '')
+    if (HF_TOKEN) {
+      try {
+        const res = await fetch(HF_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${HF_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ inputs: text, options: { wait_for_model: true } })
+        })
+        if (res.ok) {
+          const data = await res.json()
+          const arr = Array.isArray(data) && Array.isArray(data[0]) ? data[0] : Array.isArray(data) ? data : []
+          const byLabel: Record<string, number> = {}
+          for (const item of arr as Array<{ label: string; score: number }>) {
+            if (!item || typeof item.label !== 'string') continue
+            byLabel[item.label.toLowerCase()] = item.score
+          }
+          const pos = byLabel['positive'] || byLabel['pos'] || 0
+          const neg = byLabel['negative'] || byLabel['neg'] || 0
+          const neu = byLabel['neutral'] || byLabel['neu'] || 0
+          let level = 'NEUTRAL'
+          if (pos >= 0.85) level = 'VERY_POSITIVE'
+          else if (neg >= 0.85) level = 'VERY_NEGATIVE'
+          else if (pos >= 0.6) level = 'POSITIVE'
+          else if (neg >= 0.6) level = 'NEGATIVE'
+          else if (neu >= 0.5) level = 'NEUTRAL'
+          const score = pos - neg
+          return { score, sentiment: level }
+        }
+      } catch {}
+    }
+    const result = sentiment.analyze(text)
+    let level: string
     if (result.score >= 2) {
-      sentimentLevel = 'VERY_POSITIVE'
+      level = 'VERY_POSITIVE'
     } else if (result.score >= 1) {
-      sentimentLevel = 'POSITIVE'
+      level = 'POSITIVE'
     } else if (result.score > -1) {
-      sentimentLevel = 'NEUTRAL'
+      level = 'NEUTRAL'
     } else if (result.score > -2) {
-      sentimentLevel = 'NEGATIVE'
+      level = 'NEGATIVE'
     } else {
-      sentimentLevel = 'VERY_NEGATIVE'
+      level = 'VERY_NEGATIVE'
     }
-
-    return {
-      score: result.score,
-      sentiment: sentimentLevel
-    }
+    return { score: result.score, sentiment: level }
   }
 
   static flagInappropriateContent(content: string): { isFlagged: boolean; reason?: string } {
-    const lowerContent = content.toLowerCase()
-
-    // Basic inappropriate content detection
+    const text = String(content || '')
     const inappropriatePatterns = [
       /\b(hate|kill|die|stupid|idiot|retard)\b/gi,
       /\b(fuck|shit|damn|bitch|asshole)\b/gi
     ]
 
-    const spamPatterns = [
-      /(.)\1{4,}/, // 5+ repeated characters
-      /^[a-zA-Z\s]{1,5}$/, // Very short content
-      /^.{200,}$/ // Very long content
-    ]
-
     for (const pattern of inappropriatePatterns) {
-      if (pattern.test(content)) {
-        return {
-          isFlagged: true,
-          reason: 'INAPPROPRIATE_LANGUAGE'
-        }
+      if (pattern.test(text)) {
+        return { isFlagged: true, reason: 'INAPPROPRIATE_LANGUAGE' }
       }
     }
 
+    if (text.length >= 700) {
+      return { isFlagged: false }
+    }
+
+    const spamPatterns = [
+      /([-_*~.!?])\1{9,}/,
+      /\s{10,}/
+    ]
+
     for (const pattern of spamPatterns) {
-      if (pattern.test(content)) {
-        return {
-          isFlagged: true,
-          reason: pattern.toString() === '/^[a-zA-Z\\s]{1,5}$/' ? 'TOO_SHORT' : 'SPAM'
-        }
+      if (pattern.test(text)) {
+        return { isFlagged: true, reason: 'SPAM' }
       }
     }
 
@@ -264,7 +290,7 @@ export class FeedbackService {
         settings: {
           allowAnonymous: session.allowAnonymousFeedback === false ? false : true,
           minFeedbackLength: 50,
-          maxFeedbackLength: 1000,
+          maxFeedbackLength: 2500,
           autoClose: false,
           reminderFrequency: 'none' as const
         }
@@ -328,7 +354,7 @@ export class FeedbackService {
         settings: {
           allowAnonymous: (session as any).allowAnonymousFeedback === false ? false : true,
           minFeedbackLength: 50,
-          maxFeedbackLength: 1000,
+          maxFeedbackLength: 2500,
           autoClose: false,
           reminderFrequency: 'none' as const
         }
@@ -411,8 +437,8 @@ export class FeedbackService {
         throw new Error('Feedback must be at least 10 characters long')
       }
 
-      if (data.content.length > 2000) {
-        throw new Error('Feedback must be 2000 characters or less')
+      if (data.content.length > 2500) {
+        throw new Error('Feedback must be 2500 characters or less')
       }
 
       // Generate anonymous identifiers
@@ -434,8 +460,7 @@ export class FeedbackService {
         throw new Error('You have already submitted feedback for this person in this session')
       }
 
-      // Analyze sentiment and flag inappropriate content
-      const sentimentAnalysis = this.analyzeSentiment(data.content)
+      const sentimentAnalysis = await this.analyzeSentiment(data.content)
       const contentFlag = this.flagInappropriateContent(data.content)
 
       // Create submission
@@ -548,6 +573,9 @@ export class FeedbackService {
         throw new Error('Session not found or access denied')
       }
 
+      // Reprocess flags for this session to apply current rules
+      await FeedbackService.reprocessFlagsForSession(sessionId)
+
       // Get feedback for this session
       const submissions = await prisma.feedbackSubmission.findMany({
         where: { sessionId },
@@ -569,6 +597,25 @@ export class FeedbackService {
     } catch (error) {
       console.error('Get session feedback error:', error)
       throw error
+    }
+  }
+
+  static async reprocessFlagsForSession(sessionId: string): Promise<void> {
+    try {
+      const flagged = await prisma.feedbackSubmission.findMany({
+        where: { sessionId, isFlagged: true },
+        select: { id: true, content: true }
+      })
+
+      for (const s of flagged as Array<{ id: string; content: string }>) {
+        const res = FeedbackService.flagInappropriateContent(s.content)
+        await prisma.feedbackSubmission.update({
+          where: { id: s.id },
+          data: { isFlagged: res.isFlagged, flagReason: res.reason || null }
+        })
+      }
+    } catch (error) {
+      console.error('Reprocess flags error:', error)
     }
   }
 
@@ -708,6 +755,143 @@ export class FeedbackService {
       }
     } catch (error: any) {
       console.error('Update session status error:', error)
+      throw error
+    }
+  }
+
+  static async updateSession(
+    userId: string,
+    sessionId: string,
+    updates: {
+      title?: string
+      description?: string
+      startsAt?: Date | string | null
+      endsAt?: Date | string | null
+      allowSelfFeedback?: boolean
+      allowAnonymousFeedback?: boolean
+    }
+  ): Promise<FeedbackSession> {
+    try {
+      if (!sessionId) {
+        throw new Error('Session ID is required')
+      }
+
+      const session = await prisma.feedbackSession.findUnique({
+        where: { id: sessionId },
+        include: { group: true, submissions: { include: { targetUser: { select: { id: true, username: true, fullName: true } } } } }
+      })
+
+      if (!session) {
+        throw new Error('Session not found')
+      }
+
+      const membership = await prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId: session.groupId, userId } }
+      })
+
+      if (!membership || membership.role !== 'ADMIN') {
+        throw new Error('Only group admins can update sessions')
+      }
+
+      const data: any = {}
+
+      if (typeof updates.title === 'string') {
+        const t = updates.title.trim()
+        if (!t || t.length < 3) {
+          throw new Error('Session title must be at least 3 characters long')
+        }
+        if (t.length > 200) {
+          throw new Error('Session title must be 200 characters or less')
+        }
+        data.title = t
+      }
+
+      if (typeof updates.description === 'string') {
+        const d = updates.description.trim()
+        if (d && d.length > 1000) {
+          throw new Error('Session description must be 1000 characters or less')
+        }
+        data.description = d || null
+      }
+
+      const toDate = (v: any) => (v === null ? null : v ? new Date(v) : undefined)
+      const startsAt = toDate(updates.startsAt)
+      const endsAt = toDate(updates.endsAt)
+      if (startsAt !== undefined) data.startsAt = startsAt
+      if (endsAt !== undefined) data.endsAt = endsAt
+      if (data.startsAt && data.endsAt && data.startsAt >= data.endsAt) {
+        throw new Error('Start time must be before end time')
+      }
+
+      if (typeof updates.allowSelfFeedback !== 'undefined') {
+        data.allowSelfFeedback = !!updates.allowSelfFeedback
+      }
+
+      if (typeof updates.allowAnonymousFeedback !== 'undefined') {
+        data.allowAnonymousFeedback = !!updates.allowAnonymousFeedback
+      }
+
+      const updated = await prisma.feedbackSession.update({
+        where: { id: sessionId },
+        data,
+        include: {
+          group: { select: { id: true, name: true } },
+          submissions: { include: { targetUser: { select: { id: true, username: true, fullName: true } } } }
+        }
+      })
+
+      await AuthService.logAuditEvent(userId, 'SESSION_UPDATE', 'FeedbackSession', sessionId, {
+        updated: Object.keys(data)
+      })
+
+      return {
+        ...updated,
+        submissionCount: updated.submissions.length
+      }
+    } catch (error: any) {
+      console.error('Update session error:', error)
+      throw error
+    }
+  }
+
+  static async deleteSession(userId: string, sessionId: string): Promise<void> {
+    try {
+      if (!sessionId) {
+        throw new Error('Session ID is required')
+      }
+
+      const session = await prisma.feedbackSession.findUnique({
+        where: { id: sessionId },
+        include: { group: true }
+      })
+
+      if (!session) {
+        throw new Error('Session not found')
+      }
+
+      const membership = await prisma.groupMember.findUnique({
+        where: {
+          groupId_userId: {
+            groupId: session.groupId,
+            userId
+          }
+        }
+      })
+
+      if (!membership || membership.role !== 'ADMIN') {
+        throw new Error('Only group admins can delete sessions')
+      }
+
+      await prisma.feedbackSession.delete({
+        where: { id: sessionId }
+      })
+
+      await AuthService.logAuditEvent(userId, 'SESSION_DELETE', 'FeedbackSession', sessionId, {
+        groupId: session.groupId,
+        title: session.title
+      })
+    } catch (error: any) {
+      console.error('Delete session error:', error)
       throw error
     }
   }

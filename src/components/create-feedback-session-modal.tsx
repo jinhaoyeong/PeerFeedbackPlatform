@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Calendar, Users, MessageSquare, Shield, Clock, Settings, Loader2 } from 'lucide-react'
+import { X, Calendar, Users, MessageSquare, Bell, Clock, Settings, Loader2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -15,10 +15,10 @@ const createSessionSchema = z.object({
   name: z.string().min(1, 'Session name is required'),
   description: z.string().optional(),
   groupId: z.string().min(1, 'Please select a group'),
-  isAnonymous: z.boolean(),
   allowAnonymousFeedback: z.boolean(),
   hasEndDate: z.boolean(),
   endDate: z.string().optional(),
+  notifyOnCreate: z.boolean(),
 })
 
 type CreateSessionForm = z.infer<typeof createSessionSchema>
@@ -51,11 +51,11 @@ export function CreateFeedbackSessionModal({
     defaultValues: {
       name: '',
       groupId: '',
-      isAnonymous: false,
       allowAnonymousFeedback: true,
       hasEndDate: false,
       description: '',
-      endDate: ''
+      endDate: '',
+      notifyOnCreate: false
     }
   })
 
@@ -89,7 +89,8 @@ export function CreateFeedbackSessionModal({
         startsAt: new Date(),
         endsAt: data.hasEndDate && data.endDate ? new Date(data.endDate) : undefined,
         allowSelfFeedback: true,
-        allowAnonymousFeedback: !!data.allowAnonymousFeedback
+        allowAnonymousFeedback: !!data.allowAnonymousFeedback,
+        notifyOnCreate: !!data.notifyOnCreate
       }
 
       const res: any = await apiClient.createSession(payload)
@@ -117,11 +118,11 @@ export function CreateFeedbackSessionModal({
       reset({
         name: '',
         groupId: '',
-        isAnonymous: false,
         allowAnonymousFeedback: allowAnon,
         hasEndDate: false,
         description: '',
-        endDate: ''
+        endDate: '',
+        notifyOnCreate: false
       })
     } catch {
       reset()
@@ -227,29 +228,29 @@ export function CreateFeedbackSessionModal({
 
           {/* Settings */}
           <div className="space-y-4 pt-2">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center">
-              <Settings className="h-4 w-4 mr-2 text-indigo-600 dark:text-indigo-400" />
-              Session Settings
-            </h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center">
+            <Settings className="h-4 w-4 mr-2 text-indigo-600 dark:text-indigo-400" />
+            Session Settings
+          </h3>
 
-            {/* Anonymous Session */}
-            <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 rounded-xl">
-              <div className="flex items-center space-x-3">
-                <Shield className="h-5 w-5 text-slate-500 dark:text-slate-400" />
-                <div>
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">Anonymous Session</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Hide session creator identity</p>
-                </div>
+          {/* Notify Participants on Creation */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 rounded-xl">
+            <div className="flex items-center space-x-3">
+              <Bell className="h-5 w-5 text-slate-500 dark:text-slate-400" />
+              <div>
+                <p className="text-sm font-medium text-slate-900 dark:text-white">Notify on Session Creation</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Send invitations to group members</p>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  {...register('isAnonymous')}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-              </label>
             </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                {...register('notifyOnCreate')}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
+          </div>
 
             {/* Allow Anonymous Feedback */}
             <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 rounded-xl">

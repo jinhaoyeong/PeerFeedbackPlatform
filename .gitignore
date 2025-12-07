@@ -12,3 +12,15 @@ dev.db
 COMPLETE-FUNCTIONALITY-SUMMARY.md
 testuser.txt
 nul
+coverage/
+dist/
+build/
+out/
+.turbo/
+.vercel/
+.cache/
+.eslintcache
+.vscode/
+.idea/
+Thumbs.db
+*.tsbuildinfo

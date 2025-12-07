@@ -203,8 +203,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const data = await response.json()
 
       if (!response.ok) {
-        const detail = (data && (data.detail || (Array.isArray(data.errors) ? data.errors.join(', ') : ''))) || ''
-        throw new Error(detail ? `Registration failed: ${detail}` : 'Registration failed')
+        const errors = Array.isArray(data?.errors)
+          ? data.errors.filter(Boolean).join('; ')
+          : (typeof data?.errors === 'string' ? data.errors : '')
+        const candidates = [
+          typeof data?.message === 'string' ? data.message : '',
+          errors,
+          typeof data?.detail === 'string' ? data.detail : '',
+          typeof data?.error === 'string' ? data.error : ''
+        ].filter(Boolean)
+        const msg = candidates.length > 0
+          ? candidates[0] + (candidates.slice(1).filter(Boolean).length ? `: ${candidates.slice(1).join('; ')}` : '')
+          : 'Registration failed'
+        throw new Error(msg)
       }
 
       const { user: newUser, token: newToken } = data
@@ -235,6 +246,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Clear localStorage
     localStorage.removeItem('auth-token')
     localStorage.removeItem('auth-user')
+    try { localStorage.removeItem('user-settings') } catch {}
+    try { localStorage.removeItem('settings-pending-ops') } catch {}
 
     // Redirect to home
     router.push('/')

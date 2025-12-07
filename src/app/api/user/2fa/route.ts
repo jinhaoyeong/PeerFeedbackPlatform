@@ -6,6 +6,7 @@ import * as QRCode from 'qrcode'
 import { encrypt, decrypt, hash } from '@/lib/crypto'
 import { NotificationService } from '@/lib/notifications'
 import { AuthService } from '@/lib/auth-service'
+import crypto from 'crypto'
 
 function getUserFromToken(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
@@ -19,6 +20,14 @@ function getUserFromToken(request: NextRequest) {
   } catch {
     return null
   }
+}
+
+function getIpAddress(request: NextRequest): string {
+  return (
+    request.headers.get('x-forwarded-for') ||
+    request.headers.get('x-real-ip') ||
+    'unknown'
+  )
 }
 
 export async function GET(request: NextRequest) {
@@ -82,8 +91,7 @@ export async function POST(request: NextRequest) {
       if (!valid) {
         return NextResponse.json({ error: 'Invalid verification code' }, { status: 400 })
       }
-
-      const backupCodes = Array.from({ length: 8 }).map(() => Math.random().toString().slice(2, 8))
+      const backupCodes = Array.from({ length: 8 }).map(() => crypto.randomInt(0, 10 ** 6).toString().padStart(6, '0'))
       const backupCodesHash = backupCodes.map(c => hash(c)).join(',')
 
       await prisma.user.update({
@@ -112,12 +120,93 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true })
     }
 
+    if (action === 'email-init') {
+      const ipAddress = getIpAddress(request)
+      const canProceed = await AuthService.checkRateLimit(ipAddress, '2fa_email_setup_request', 3, 10)
+      if (!canProceed) {
+        return NextResponse.json({ error: 'Too many requests. Try later.' }, { status: 429 })
+      }
+      const code = crypto.randomInt(100000, 1000000).toString()
+      const expires = new Date(Date.now() + 10 * 60 * 1000)
+      const codeHash = hash(code)
+      try {
+        await prisma.auditLog.create({
+          data: {
+            userId: user.userId,
+            action: 'TWOFA_EMAIL_SETUP',
+            resource: 'User',
+            resourceId: user.userId,
+            details: JSON.stringify({ codeHash, expiresAt: expires.toISOString() })
+          }
+        })
+      } catch {}
+      try {
+        await NotificationService.sendEmail(
+          user.userId,
+          'Your 2FA setup code',
+          `Use this code to enable two-factor authentication: ${code}`,
+          `<p>Use this code to enable two-factor authentication:</p><h2>${code}</h2><p>This code expires at ${expires.toLocaleString()}.</p>`,
+          { force: true }
+        )
+      } catch (err) {
+        if (process.env.NODE_ENV !== 'production') {
+          return NextResponse.json({ success: true, devCode: code })
+        }
+        return NextResponse.json({ error: 'Email delivery failed' }, { status: 500 })
+      }
+      return NextResponse.json({ success: true })
+    }
+
+    if (action === 'email-verify') {
+      const code = String(body.code || '')
+      const latest = await prisma.auditLog.findFirst({
+        where: { userId: user.userId, action: 'TWOFA_EMAIL_SETUP' },
+        orderBy: { occurredAt: 'desc' }
+      })
+      let details: any = null
+      try { details = latest?.details ? JSON.parse(latest.details as string) : null } catch {}
+      const codeHash = details?.codeHash
+      const expiresAtStr = details?.expiresAt
+      if (!codeHash || !expiresAtStr) {
+        return NextResponse.json({ error: 'No setup code found' }, { status: 400 })
+      }
+      const expiresAt = new Date(expiresAtStr)
+      if (expiresAt.getTime() < Date.now()) {
+        return NextResponse.json({ error: 'Code expired' }, { status: 400 })
+      }
+      if (hash(code) !== codeHash) {
+        return NextResponse.json({ error: 'Invalid code' }, { status: 400 })
+      }
+      await prisma.user.update({
+        where: { id: user.userId },
+        data: {
+          twoFAEnabled: true,
+          twoFASecretEnc: null,
+          twoFASecretTempEnc: null,
+          twoFARecoveryCodesEnc: null
+        } as any
+      })
+      return NextResponse.json({ success: true })
+    }
+
     if (action === 'fallback') {
+      const ipAddress = getIpAddress(request)
+      const canProceed = await AuthService.checkRateLimit(ipAddress, '2fa_fallback_request', 3, 10)
+      if (!canProceed) {
+        return NextResponse.json({ error: 'Too many fallback requests. Try later.' }, { status: 429 })
+      }
+      if (user.twofa !== 'pending') {
+        return NextResponse.json({ error: '2FA challenge required' }, { status: 400 })
+      }
+      const rec = await prisma.user.findUnique({ where: { id: user.userId } }) as any
+      if (!rec?.twoFAEnabled || !rec?.twoFASecretEnc) {
+        return NextResponse.json({ error: '2FA not enabled' }, { status: 400 })
+      }
       const method = (body.method as 'email' | 'sms') || 'email'
       if (method === 'sms') {
         return NextResponse.json({ error: 'SMS fallback not configured' }, { status: 501 })
       }
-      const code = Math.floor(100000 + Math.random() * 900000).toString()
+      const code = crypto.randomInt(100000, 1000000).toString()
       const expires = new Date(Date.now() + 10 * 60 * 1000)
       await prisma.user.update({
         where: { id: user.userId },
@@ -132,7 +221,8 @@ export async function POST(request: NextRequest) {
           user.userId,
           'Your 2FA verification code',
           `Use this code to verify login: ${code}`,
-          `<p>Use this code to verify login:</p><h2>${code}</h2><p>This code expires at ${expires.toLocaleString()}.</p>`
+          `<p>Use this code to verify login:</p><h2>${code}</h2><p>This code expires at ${expires.toLocaleString()}.</p>`,
+          { force: true }
         )
         return NextResponse.json({ success: true })
       } catch (err) {
@@ -144,6 +234,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'verify-fallback') {
+      const ipAddress = getIpAddress(request)
+      const canProceed = await AuthService.checkRateLimit(ipAddress, '2fa_verify_fallback', 5, 10)
+      if (!canProceed) {
+        return NextResponse.json({ error: 'Too many verification attempts. Try later.' }, { status: 429 })
+      }
+      if (user.twofa !== 'pending') {
+        return NextResponse.json({ error: '2FA challenge required' }, { status: 400 })
+      }
       const code = String(body.code || '')
       const record = await prisma.user.findUnique({
         where: { id: user.userId }
@@ -165,6 +263,24 @@ export async function POST(request: NextRequest) {
       })
       const fullToken = AuthService.generateToken(user.userId)
       const dbUser = await prisma.user.findUnique({ where: { id: user.userId } }) as any
+      try {
+        let loginAlertsEnabled = false
+        try {
+          const latest = await prisma.auditLog.findFirst({ where: { userId: user.userId, action: 'USER_SETTINGS' }, orderBy: { occurredAt: 'desc' } })
+          const stored = latest?.details ? JSON.parse(latest.details as string) : null
+          loginAlertsEnabled = !!stored?.loginAlertsEnabled
+        } catch {}
+        if (loginAlertsEnabled) {
+          await NotificationService.sendEmail(
+          user.userId,
+          'Login Alert',
+          'A new login to your account was completed via email fallback.',
+          `<p>A new login to your account was completed via email fallback.</p><p>Time: ${new Date().toLocaleString()}</p>`,
+          { force: true }
+        )
+        }
+      } catch {}
+
       const response = NextResponse.json({
         success: true,
         token: fullToken,
@@ -198,6 +314,24 @@ export async function POST(request: NextRequest) {
       }
       const fullToken = AuthService.generateToken(user.userId)
       const dbUser = await prisma.user.findUnique({ where: { id: user.userId } }) as any
+      try {
+        let loginAlertsEnabled = false
+        try {
+          const latest = await prisma.auditLog.findFirst({ where: { userId: user.userId, action: 'USER_SETTINGS' }, orderBy: { occurredAt: 'desc' } })
+          const stored = latest?.details ? JSON.parse(latest.details as string) : null
+          loginAlertsEnabled = !!stored?.loginAlertsEnabled
+        } catch {}
+        if (loginAlertsEnabled) {
+          await NotificationService.sendEmail(
+            user.userId,
+            'Login Alert',
+            'A new login to your account was completed via authenticator code.',
+            `<p>A new login to your account was completed via authenticator code.</p><p>Time: ${new Date().toLocaleString()}</p>`,
+            { force: true }
+          )
+        }
+      } catch {}
+
       const response = NextResponse.json({
         success: true,
         token: fullToken,

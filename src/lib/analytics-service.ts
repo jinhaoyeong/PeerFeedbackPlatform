@@ -1,4 +1,5 @@
 import { prisma } from './prisma'
+import Sentiment from 'sentiment'
 
 export interface DashboardStats {
   totalFeedbackReceived: number
@@ -17,8 +18,15 @@ export interface DashboardStats {
 export interface AnalyticsData {
   sentimentTrend: Array<{
     date: string
-    sentiment: string
-    count: number
+    distribution: {
+      VERY_NEGATIVE: number
+      NEGATIVE: number
+      NEUTRAL: number
+      POSITIVE: number
+      VERY_POSITIVE: number
+    }
+    total: number
+    dominant: string
   }>
   feedbackByGroup: Array<{
     groupId: string
@@ -35,7 +43,30 @@ export interface AnalyticsData {
     theme: string
     count: number
     sentiment: string
+    examples: Array<{ text: string; sentiment: string }>
+    distribution?: {
+      VERY_NEGATIVE: number
+      NEGATIVE: number
+      NEUTRAL: number
+      POSITIVE: number
+      VERY_POSITIVE: number
+    }
   }>
+  totals?: {
+    feedbackCount: number
+  }
+  participants?: {
+    submitters: number
+    targets: number
+    engaged: number
+  }
+  sentimentDistribution?: {
+    VERY_NEGATIVE: number
+    NEGATIVE: number
+    NEUTRAL: number
+    POSITIVE: number
+    VERY_POSITIVE: number
+  }
 }
 
 export class AnalyticsService {
@@ -56,16 +87,9 @@ export class AnalyticsService {
 
       const logs = await prisma.auditLog.findMany({
         where: { userId, action: 'FEEDBACK_SUBMIT' },
-        select: { details: true }
+        select: { id: true }
       })
-      const feedbackGiven = logs.reduce((count: number, log: any) => {
-        try {
-          const d = log.details ? JSON.parse(log.details as string) : null
-          return count + ((d && d.isAnonymous === false) ? 1 : 0)
-        } catch {
-          return count
-        }
-      }, 0)
+      const feedbackGiven = logs.length
 
       // Get user's average sentiment
       const aggregation = await prisma.feedbackAggregation.findUnique({
@@ -156,8 +180,7 @@ export class AnalyticsService {
       // Get weekly activity
       const weeklyActivity = await this.getWeeklyActivity(userId, startDate)
 
-      // Get top feedback themes (simplified)
-      const topFeedbackThemes = await this.getTopFeedbackThemes(userId)
+      const topFeedbackThemes = await this.getTopFeedbackThemes(userId, startDate)
 
       return {
         sentimentTrend,
@@ -168,6 +191,136 @@ export class AnalyticsService {
     } catch (error) {
       console.error('Get analytics data error:', error)
       throw new Error('Failed to retrieve analytics data')
+    }
+  }
+
+  static async getSessionAnalytics(userId: string, sessionId: string): Promise<AnalyticsData> {
+    try {
+      
+
+      const sentimentTrend = await prisma.feedbackSubmission.findMany({
+        where: {
+          sessionId,
+          
+        },
+        select: { sentiment: true, submittedAt: true },
+        orderBy: { submittedAt: 'asc' }
+      }).then((submissions: any[]) => {
+        const groupedByDate: { [key: string]: { [sentiment: string]: number } } = {}
+        submissions.forEach((submission: any) => {
+          const date = submission.submittedAt.toISOString().split('T')[0]
+          if (!groupedByDate[date]) groupedByDate[date] = {}
+          if (submission.sentiment) {
+            groupedByDate[date][submission.sentiment] = (groupedByDate[date][submission.sentiment] || 0) + 1
+          }
+        })
+        return Object.entries(groupedByDate).map(([date, sentiments]) => {
+          const distribution = {
+            VERY_NEGATIVE: sentiments['VERY_NEGATIVE'] || 0,
+            NEGATIVE: sentiments['NEGATIVE'] || 0,
+            NEUTRAL: sentiments['NEUTRAL'] || 0,
+            POSITIVE: sentiments['POSITIVE'] || 0,
+            VERY_POSITIVE: sentiments['VERY_POSITIVE'] || 0,
+          }
+          const total = Object.values(sentiments).reduce((sum: number, c: number) => sum + c, 0)
+          const dominant = Object.entries(sentiments).sort(([, a], [, b]) => b - a)[0]?.[0] || 'NEUTRAL'
+          return { date, distribution, total, dominant }
+        })
+      })
+
+      const session = await prisma.feedbackSession.findUnique({
+        where: { id: sessionId },
+        include: { group: { select: { id: true, name: true } } }
+      })
+
+      let feedbackByGroup: Array<{ groupId: string; groupName: string; feedbackCount: number; averageSentiment: string }>
+      let sentimentDistribution: { VERY_NEGATIVE: number; NEGATIVE: number; NEUTRAL: number; POSITIVE: number; VERY_POSITIVE: number } = {
+        VERY_NEGATIVE: 0,
+        NEGATIVE: 0,
+        NEUTRAL: 0,
+        POSITIVE: 0,
+        VERY_POSITIVE: 0
+      }
+      let participants: { submitters: number; targets: number; engaged: number } = { submitters: 0, targets: 0, engaged: 0 }
+      let totals: { feedbackCount: number } = { feedbackCount: 0 }
+      if (session?.group) {
+        const submissionsAll = await prisma.feedbackSubmission.findMany({
+          where: { sessionId },
+          select: { sentiment: true, targetUserId: true, submitterId: true }
+        })
+
+        const sentimentScores: Record<string, number> = {
+          VERY_NEGATIVE: -2,
+          NEGATIVE: -1,
+          NEUTRAL: 0,
+          POSITIVE: 1,
+          VERY_POSITIVE: 2
+        }
+
+        const scoreSum = submissionsAll.reduce((sum: number, s: any) => sum + (sentimentScores[String(s.sentiment || 'NEUTRAL').toUpperCase()] ?? 0), 0)
+        const scoreCount = submissionsAll.filter((s: any) => s.sentiment).length
+        const avg = scoreCount > 0 ? scoreSum / scoreCount : 0
+        const labelForAvg = (avg: number) => {
+          if (avg >= 1.5) return 'VERY_POSITIVE'
+          if (avg >= 0.5) return 'POSITIVE'
+          if (avg >= -0.5) return 'NEUTRAL'
+          if (avg >= -1.5) return 'NEGATIVE'
+          return 'VERY_NEGATIVE'
+        }
+
+        feedbackByGroup = [{
+          groupId: session.group.id,
+          groupName: session.group.name,
+          feedbackCount: submissionsAll.length,
+          averageSentiment: labelForAvg(avg)
+        }]
+        submissionsAll.forEach((s: any) => {
+          const key = String(s.sentiment || 'NEUTRAL').toUpperCase() as keyof typeof sentimentDistribution
+          sentimentDistribution[key] = (sentimentDistribution[key] || 0) + 1
+        })
+
+        const uniqueSubmitters = new Set(submissionsAll.map((s: any) => s.submitterId).filter(Boolean)).size
+        const uniqueTargets = new Set(submissionsAll.map((s: any) => s.targetUserId).filter(Boolean)).size
+        participants = { submitters: uniqueSubmitters, targets: uniqueTargets, engaged: uniqueSubmitters + uniqueTargets }
+        totals = { feedbackCount: submissionsAll.length }
+      } else {
+        feedbackByGroup = []
+        participants = { submitters: 0, targets: 0, engaged: 0 }
+        totals = { feedbackCount: 0 }
+      }
+
+      const submissionsForActivity = await prisma.feedbackSubmission.findMany({
+        where: { sessionId },
+        select: { submittedAt: true }
+      })
+
+      const weeklyData: { [key: string]: { feedbackGiven: number; feedbackReceived: number } } = {}
+
+      const getWeekKey = (date: Date) => {
+        const d = new Date(date)
+        d.setDate(d.getDate() - d.getDay())
+        return d.toISOString().split('T')[0]
+      }
+
+      submissionsForActivity.forEach((s: any) => {
+        const wk = getWeekKey(s.submittedAt)
+        if (!weeklyData[wk]) weeklyData[wk] = { feedbackGiven: 0, feedbackReceived: 0 }
+        weeklyData[wk].feedbackGiven++
+        weeklyData[wk].feedbackReceived++
+      })
+
+      const weeklyActivity = Object.entries(weeklyData).map(([week, data]) => ({ week, feedbackGiven: data.feedbackGiven, feedbackReceived: data.feedbackReceived })).sort((a, b) => a.week.localeCompare(b.week))
+
+      const topFeedbackThemes = await prisma.feedbackSubmission.findMany({
+        where: { sessionId },
+        select: { content: true, sentiment: true },
+        take: 500
+      }).then((submissions: any[]) => this.computeTopThemes(submissions))
+
+      return { sentimentTrend, feedbackByGroup, weeklyActivity, topFeedbackThemes, totals, participants, sentimentDistribution }
+    } catch (error) {
+      console.error('Get session analytics data error:', error)
+      throw new Error('Failed to retrieve session analytics data')
     }
   }
 
@@ -203,14 +356,16 @@ export class AnalyticsService {
     })
 
     return Object.entries(groupedByDate).map(([date, sentiments]) => {
-      const dominantSentiment = Object.entries(sentiments)
-        .sort(([, a], [, b]) => b - a)[0]?.[0] || 'NEUTRAL'
-
-      return {
-        date,
-        sentiment: dominantSentiment,
-        count: Object.values(sentiments).reduce((sum, count) => sum + count, 0)
+      const distribution = {
+        VERY_NEGATIVE: sentiments['VERY_NEGATIVE'] || 0,
+        NEGATIVE: sentiments['NEGATIVE'] || 0,
+        NEUTRAL: sentiments['NEUTRAL'] || 0,
+        POSITIVE: sentiments['POSITIVE'] || 0,
+        VERY_POSITIVE: sentiments['VERY_POSITIVE'] || 0,
       }
+      const total = Object.values(sentiments).reduce((sum, count) => sum + count, 0)
+      const dominant = Object.entries(sentiments).sort(([, a], [, b]) => b - a)[0]?.[0] || 'NEUTRAL'
+      return { date, distribution, total, dominant }
     })
   }
 
@@ -226,7 +381,6 @@ export class AnalyticsService {
       }
     })
 
-    // Get session details with group information
     const sessionIds = feedbackByGroup.map((item: any) => item.sessionId)
     const sessions = await prisma.feedbackSession.findMany({
       where: {
@@ -249,94 +403,276 @@ export class AnalyticsService {
       return acc
     }, {} as { [key: string]: { id: string; name: string } })
 
-    return feedbackByGroup.map((item: any) => ({
-      groupId: sessionMap[item.sessionId]?.id || 'unknown',
-      groupName: sessionMap[item.sessionId]?.name || 'Unknown Group',
-      feedbackCount: item._count.id,
-      averageSentiment: 'NEUTRAL' // Simplified - would need more complex query
+    const sentiments = await prisma.feedbackSubmission.findMany({
+      where: {
+        targetUserId: userId,
+        isFlagged: false,
+        sessionId: { in: sessionIds }
+      },
+      select: {
+        sessionId: true,
+        sentiment: true
+      }
+    })
+
+    const sentimentScores: Record<string, number> = {
+      VERY_NEGATIVE: -2,
+      NEGATIVE: -1,
+      NEUTRAL: 0,
+      POSITIVE: 1,
+      VERY_POSITIVE: 2
+    }
+
+    const groupAgg: Record<string, { name: string; count: number; scoreSum: number; scoreCount: number }> = {}
+
+    feedbackByGroup.forEach((item: any) => {
+      const g = sessionMap[item.sessionId]
+      const gid = g?.id || 'unknown'
+      const name = g?.name || 'Unknown Group'
+      if (!groupAgg[gid]) groupAgg[gid] = { name, count: 0, scoreSum: 0, scoreCount: 0 }
+      groupAgg[gid].count += item._count.id
+    })
+
+    sentiments.forEach((s: any) => {
+      const g = sessionMap[s.sessionId]
+      const gid = g?.id || 'unknown'
+      const name = g?.name || 'Unknown Group'
+      if (!groupAgg[gid]) groupAgg[gid] = { name, count: 0, scoreSum: 0, scoreCount: 0 }
+      const key = String(s.sentiment || 'NEUTRAL').toUpperCase()
+      const score = sentimentScores[key] ?? 0
+      groupAgg[gid].scoreSum += score
+      groupAgg[gid].scoreCount += 1
+    })
+
+    const labelForAvg = (avg: number) => {
+      if (avg >= 1.5) return 'VERY_POSITIVE'
+      if (avg >= 0.5) return 'POSITIVE'
+      if (avg >= -0.5) return 'NEUTRAL'
+      if (avg >= -1.5) return 'NEGATIVE'
+      return 'VERY_NEGATIVE'
+    }
+
+    return Object.entries(groupAgg).map(([groupId, agg]) => ({
+      groupId,
+      groupName: agg.name,
+      feedbackCount: agg.count,
+      averageSentiment: agg.scoreCount > 0 ? labelForAvg(agg.scoreSum / agg.scoreCount) : 'NEUTRAL'
     }))
   }
 
   private static async getWeeklyActivity(userId: string, startDate: Date) {
-    // Get feedback given and received by week
-    const submissions = await prisma.feedbackSubmission.findMany({
-      where: {
-        OR: [
-          { targetUserId: userId },
-          // In a real implementation, we'd track who gave feedback
-        ],
-        isFlagged: false,
-        submittedAt: {
-          gte: startDate
-        }
-      },
-      select: {
-        targetUserId: true,
-        submittedAt: true
-      }
+    const received = await prisma.feedbackSubmission.findMany({
+      where: { targetUserId: userId, isFlagged: false, submittedAt: { gte: startDate } },
+      select: { submittedAt: true }
     })
 
-    // Group by week
+    const givenLogs = await prisma.auditLog.findMany({
+      where: { userId, action: 'FEEDBACK_SUBMIT', occurredAt: { gte: startDate } },
+      select: { occurredAt: true }
+    })
+
     const weeklyData: { [key: string]: { feedbackGiven: number; feedbackReceived: number } } = {}
 
-    submissions.forEach((submission: any) => {
-      const week = this.getWeekKey(submission.submittedAt)
-      if (!weeklyData[week]) {
-        weeklyData[week] = { feedbackGiven: 0, feedbackReceived: 0 }
-      }
+    const getWeekKey = (date: Date) => {
+      const d = new Date(date)
+      d.setDate(d.getDate() - d.getDay())
+      return d.toISOString().split('T')[0]
+    }
 
-      if (submission.targetUserId === userId) {
-        weeklyData[week].feedbackReceived++
-      } else {
-        weeklyData[week].feedbackGiven++
-      }
+    received.forEach((r: any) => {
+      const wk = getWeekKey(r.submittedAt)
+      if (!weeklyData[wk]) weeklyData[wk] = { feedbackGiven: 0, feedbackReceived: 0 }
+      weeklyData[wk].feedbackReceived++
     })
 
-    return Object.entries(weeklyData).map(([week, data]) => ({
-      week,
-      feedbackGiven: data.feedbackGiven,
-      feedbackReceived: data.feedbackReceived
-    })).sort((a, b) => a.week.localeCompare(b.week))
+    givenLogs.forEach((l: any) => {
+      const wk = getWeekKey(l.occurredAt)
+      if (!weeklyData[wk]) weeklyData[wk] = { feedbackGiven: 0, feedbackReceived: 0 }
+      weeklyData[wk].feedbackGiven++
+    })
+
+    return Object.entries(weeklyData).map(([week, data]) => ({ week, feedbackGiven: data.feedbackGiven, feedbackReceived: data.feedbackReceived })).sort((a, b) => a.week.localeCompare(b.week))
   }
 
-  private static async getTopFeedbackThemes(userId: string) {
-    // This is a simplified implementation
-    // In a real system, we'd use NLP to extract themes from feedback content
+  private static async getTopFeedbackThemes(userId: string, startDate: Date) {
     const submissions = await prisma.feedbackSubmission.findMany({
-      where: {
-        targetUserId: userId,
-        isFlagged: false
-      },
-      select: {
-        content: true,
-        sentiment: true
-      },
-      take: 100
+      where: { targetUserId: userId, isFlagged: false, submittedAt: { gte: startDate } },
+      select: { content: true, sentiment: true },
+      take: 500
     })
 
-    // Simple keyword-based theme extraction
-    const themes = [
-      { theme: 'Communication', keywords: ['communication', 'talking', 'listening', 'speaking'] },
-      { theme: 'Leadership', keywords: ['leadership', 'leading', 'managing', 'guiding'] },
-      { theme: 'Technical Skills', keywords: ['technical', 'coding', 'programming', 'skills'] },
-      { theme: 'Teamwork', keywords: ['teamwork', 'collaboration', 'team', 'cooperation'] },
-      { theme: 'Creativity', keywords: ['creative', 'innovation', 'ideas', 'thinking'] }
-    ]
+    return this.computeTopThemes(submissions)
+  }
 
-    const themeCounts = themes.map(theme => {
-      const count = submissions.filter((submission: any) => {
-        const content = submission.content.toLowerCase()
-        return theme.keywords.some((keyword: any) => content.includes(keyword))
-      }).length
+  private static computeTopThemes(submissions: Array<{ content: string; sentiment?: string }>) {
+    const stop = new Set([
+      'the','a','an','and','or','but','if','in','on','at','to','for','of','with','without','by','from','is','are','was','were','be','been','being','it','this','that','i','you','he','she','we','they','them','me','my','your','our','their',
+      'when','which','would','could','should','also','very','really','just','like','so','then','than','because','as','while','where','what','who','whose','whom','there','here','into','about','across','over','under','again','still','already',
+      'session','feedback','user','team','work','project','during'
+    ])
 
-      return {
-        theme: theme.theme,
-        count,
-        sentiment: 'NEUTRAL' // Simplified
+    const scoreMap: Record<string, number> = {
+      VERY_NEGATIVE: -2,
+      NEGATIVE: -1,
+      NEUTRAL: 0,
+      POSITIVE: 1,
+      VERY_POSITIVE: 2
+    }
+
+    const agg: Record<string, { count: number; scoreSum: number; scoreCount: number; examples: Array<{ text: string; sentiment: string }>; distribution: { VERY_NEGATIVE: number; NEGATIVE: number; NEUTRAL: number; POSITIVE: number; VERY_POSITIVE: number } }> = {}
+    const localSentiment = new Sentiment()
+
+    submissions.forEach((s: any) => {
+      const text = String(s.content || '').toLowerCase().replace(/[^a-z\s]/g, ' ')
+      const raw = text.split(/\s+/).filter(Boolean)
+      const tokens = raw.filter(t => t.length > 2 && !stop.has(t))
+      const score = scoreMap[String(s.sentiment || 'NEUTRAL').toUpperCase()] ?? 0
+
+      for (const tok of tokens) {
+        if (!agg[tok]) agg[tok] = { count: 0, scoreSum: 0, scoreCount: 0, examples: [], distribution: { VERY_NEGATIVE: 0, NEGATIVE: 0, NEUTRAL: 0, POSITIVE: 0, VERY_POSITIVE: 0 } }
+        agg[tok].count += 1
+        const sentences = String(s.content || '').split(/[.!?\n]+/).map(v => v.trim()).filter(Boolean)
+        let used = false
+        for (const sent of sentences) {
+          const sentLower = sent.toLowerCase()
+          if (sentLower.includes(tok)) {
+            const res = localSentiment.analyze(sent)
+            let lvl = 0
+            if (res.score >= 2) lvl = 2
+            else if (res.score >= 1) lvl = 1
+            else if (res.score <= -2) lvl = -2
+            else if (res.score <= -1) lvl = -1
+            else lvl = 0
+            agg[tok].scoreSum += lvl
+            agg[tok].scoreCount += 1
+            const lbl = lvl >= 2 ? 'VERY_POSITIVE' : lvl === 1 ? 'POSITIVE' : lvl === -1 ? 'NEGATIVE' : lvl <= -2 ? 'VERY_NEGATIVE' : 'NEUTRAL'
+            agg[tok].distribution[lbl as 'VERY_NEGATIVE' | 'NEGATIVE' | 'NEUTRAL' | 'POSITIVE' | 'VERY_POSITIVE']++
+            if (agg[tok].examples.length < 3) agg[tok].examples.push({ text: sent, sentiment: lbl })
+            used = true
+          }
+        }
+        if (!used) {
+          agg[tok].scoreSum += score
+          agg[tok].scoreCount += 1
+          const lbl = score >= 1.5 ? 'VERY_POSITIVE' : score >= 0.5 ? 'POSITIVE' : score >= -0.5 ? 'NEUTRAL' : score >= -1.5 ? 'NEGATIVE' : 'VERY_NEGATIVE'
+          agg[tok].distribution[lbl as 'VERY_NEGATIVE' | 'NEGATIVE' | 'NEUTRAL' | 'POSITIVE' | 'VERY_POSITIVE']++
+        }
       }
-    }).filter(theme => theme.count > 0)
 
-    return themeCounts.sort((a, b) => b.count - a.count).slice(0, 5)
+      for (let i = 0; i < tokens.length - 1; i++) {
+        const a = tokens[i]
+        const b = tokens[i + 1]
+        if (!a || !b) continue
+        const phrase = `${a} ${b}`
+        if (!agg[phrase]) agg[phrase] = { count: 0, scoreSum: 0, scoreCount: 0, examples: [], distribution: { VERY_NEGATIVE: 0, NEGATIVE: 0, NEUTRAL: 0, POSITIVE: 0, VERY_POSITIVE: 0 } }
+        agg[phrase].count += 1
+        const sentences = String(s.content || '').split(/[.!?\n]+/).map(v => v.trim()).filter(Boolean)
+        let used = false
+        for (const sent of sentences) {
+          const sentLower = sent.toLowerCase()
+          if (sentLower.includes(phrase)) {
+            const res = localSentiment.analyze(sent)
+            let lvl = 0
+            if (res.score >= 2) lvl = 2
+            else if (res.score >= 1) lvl = 1
+            else if (res.score <= -2) lvl = -2
+            else if (res.score <= -1) lvl = -1
+            else lvl = 0
+            agg[phrase].scoreSum += lvl
+            agg[phrase].scoreCount += 1
+            const lbl = lvl >= 2 ? 'VERY_POSITIVE' : lvl === 1 ? 'POSITIVE' : lvl === -1 ? 'NEGATIVE' : lvl <= -2 ? 'VERY_NEGATIVE' : 'NEUTRAL'
+            agg[phrase].distribution[lbl as 'VERY_NEGATIVE' | 'NEGATIVE' | 'NEUTRAL' | 'POSITIVE' | 'VERY_POSITIVE']++
+            if (agg[phrase].examples.length < 3) agg[phrase].examples.push({ text: sent, sentiment: lbl })
+            used = true
+          }
+        }
+        if (!used) {
+          agg[phrase].scoreSum += score
+          agg[phrase].scoreCount += 1
+          const lbl = score >= 1.5 ? 'VERY_POSITIVE' : score >= 0.5 ? 'POSITIVE' : score >= -0.5 ? 'NEUTRAL' : score >= -1.5 ? 'NEGATIVE' : 'VERY_NEGATIVE'
+          agg[phrase].distribution[lbl as 'VERY_NEGATIVE' | 'NEGATIVE' | 'NEUTRAL' | 'POSITIVE' | 'VERY_POSITIVE']++
+        }
+      }
+
+      for (let i = 0; i < tokens.length - 2; i++) {
+        const a = tokens[i]
+        const b = tokens[i + 1]
+        const c = tokens[i + 2]
+        if (!a || !b || !c) continue
+        const phrase3 = `${a} ${b} ${c}`
+        if (!agg[phrase3]) agg[phrase3] = { count: 0, scoreSum: 0, scoreCount: 0, examples: [], distribution: { VERY_NEGATIVE: 0, NEGATIVE: 0, NEUTRAL: 0, POSITIVE: 0, VERY_POSITIVE: 0 } }
+        agg[phrase3].count += 1
+        const sentences = String(s.content || '').split(/[.!?\n]+/).map(v => v.trim()).filter(Boolean)
+        let used3 = false
+        for (const sent of sentences) {
+          const sentLower = sent.toLowerCase()
+          if (sentLower.includes(phrase3)) {
+            const res = localSentiment.analyze(sent)
+            let lvl = 0
+            if (res.score >= 2) lvl = 2
+            else if (res.score >= 1) lvl = 1
+            else if (res.score <= -2) lvl = -2
+            else if (res.score <= -1) lvl = -1
+            else lvl = 0
+            agg[phrase3].scoreSum += lvl
+            agg[phrase3].scoreCount += 1
+            const lbl = lvl >= 2 ? 'VERY_POSITIVE' : lvl === 1 ? 'POSITIVE' : lvl === -1 ? 'NEGATIVE' : lvl <= -2 ? 'VERY_NEGATIVE' : 'NEUTRAL'
+            agg[phrase3].distribution[lbl as 'VERY_NEGATIVE' | 'NEGATIVE' | 'NEUTRAL' | 'POSITIVE' | 'VERY_POSITIVE']++
+            if (agg[phrase3].examples.length < 3) agg[phrase3].examples.push({ text: sent, sentiment: lbl })
+            used3 = true
+          }
+        }
+        if (!used3) {
+          agg[phrase3].scoreSum += score
+          agg[phrase3].scoreCount += 1
+          const lbl = score >= 1.5 ? 'VERY_POSITIVE' : score >= 0.5 ? 'POSITIVE' : score >= -0.5 ? 'NEUTRAL' : score >= -1.5 ? 'NEGATIVE' : 'VERY_NEGATIVE'
+          agg[phrase3].distribution[lbl as 'VERY_NEGATIVE' | 'NEGATIVE' | 'NEUTRAL' | 'POSITIVE' | 'VERY_POSITIVE']++
+        }
+      }
+    })
+
+    const labelForAvg = (avg: number) => {
+      if (avg >= 1.5) return 'VERY_POSITIVE'
+      if (avg >= 0.5) return 'POSITIVE'
+      if (avg >= -0.5) return 'NEUTRAL'
+      if (avg >= -1.5) return 'NEGATIVE'
+      return 'VERY_NEGATIVE'
+    }
+
+    const filtered = Object.entries(agg).filter(([key, v]) => {
+      const isPhrase = key.includes(' ')
+      const min = isPhrase ? 2 : 4
+      return v.count >= min
+    })
+
+    const phrases = filtered.filter(([k]) => k.includes(' ')).sort((a, b) => b[1].count - a[1].count)
+    const singles = filtered.filter(([k]) => !k.includes(' ')).sort((a, b) => b[1].count - a[1].count)
+
+    const top: Array<[
+      string,
+      { count: number; scoreSum: number; scoreCount: number; examples: Array<{ text: string; sentiment: string }>; distribution: { VERY_NEGATIVE: number; NEGATIVE: number; NEUTRAL: number; POSITIVE: number; VERY_POSITIVE: number } }
+    ]> = []
+    for (const e of phrases) {
+      if (top.length < 5) top.push(e)
+    }
+    if (top.length < 5) {
+      for (const e of singles) {
+        if (top.length < 5) top.push(e)
+      }
+    }
+
+    return top.map(([theme, v]) => {
+      const label = v.scoreCount > 0 ? labelForAvg(v.scoreSum / v.scoreCount) : 'NEUTRAL'
+      const examplesMatching = (v.examples || []).filter(e => e.sentiment === label)
+      const examples = examplesMatching.length > 0 ? examplesMatching : (v.examples || [])
+      return {
+        theme,
+        count: v.count,
+        sentiment: label,
+        examples: examples.slice(0, 2),
+        distribution: v.distribution
+      }
+    })
   }
 
   private static getWeekKey(date: Date): string {

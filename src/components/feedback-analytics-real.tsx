@@ -18,12 +18,26 @@ import {
   Target,
   Loader2,
 } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 interface RealAnalyticsData {
   sentimentTrend: Array<{
     date: string
-    sentiment: string
-    count: number
+    distribution: {
+      VERY_NEGATIVE: number
+      NEGATIVE: number
+      NEUTRAL: number
+      POSITIVE: number
+      VERY_POSITIVE: number
+    }
+    total: number
+    dominant: string
   }>
   feedbackByGroup: Array<{
     groupId: string
@@ -40,14 +54,19 @@ interface RealAnalyticsData {
     theme: string
     count: number
     sentiment: string
+    examples: Array<{ text: string; sentiment: string }>
+    distribution?: { VERY_NEGATIVE: number; NEGATIVE: number; NEUTRAL: number; POSITIVE: number; VERY_POSITIVE: number }
   }>
+  totals?: { feedbackCount: number }
+  participants?: { submitters: number; targets: number; engaged: number }
+  sentimentDistribution?: { VERY_NEGATIVE: number; NEGATIVE: number; NEUTRAL: number; POSITIVE: number; VERY_POSITIVE: number }
 }
 
 interface FeedbackAnalyticsProps {
-  timeRange: 'week' | 'month' | 'quarter' | 'year'
+  sessionId?: string
 }
 
-export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
+export function FeedbackAnalyticsReal({ sessionId }: FeedbackAnalyticsProps) {
   const [analyticsData, setAnalyticsData] = useState<RealAnalyticsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [showDetailed, setShowDetailed] = useState(false)
@@ -58,7 +77,9 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
       try {
         setLoading(true)
         setError(null)
-        const response = await apiClient.getAnalyticsData(timeRange)
+        const response = sessionId
+          ? await apiClient.getSessionAnalytics(sessionId)
+          : await apiClient.getAnalyticsData()
 
         if ((response as any)?.analytics) {
           setAnalyticsData((response as any).analytics)
@@ -72,7 +93,9 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
     }
 
     fetchAnalytics()
-  }, [timeRange])
+  }, [sessionId])
+
+  
 
   const getSentimentColor = (sentiment: string) => {
     switch (sentiment) {
@@ -99,7 +122,7 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
     if (analyticsData) {
       const dataStr = JSON.stringify(analyticsData, null, 2)
       const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr)
-      const exportFileDefaultName = `feedback-analytics-${timeRange}-${new Date().toISOString().split('T')[0]}.json`
+      const exportFileDefaultName = `feedback-analytics-all-time-${new Date().toISOString().split('T')[0]}.json`
 
       const linkElement = document.createElement('a')
       linkElement.setAttribute('href', dataUri)
@@ -165,21 +188,7 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
             <h3 className="text-xl font-bold text-slate-900 dark:text-white">Feedback Analytics</h3>
           </div>
           <div className="flex items-center space-x-3">
-            <div className="relative">
-              <select
-                value={timeRange}
-                className="pl-4 pr-10 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 appearance-none font-medium cursor-pointer transition-all"
-                onChange={(e) => {
-                  window.location.href = `/dashboard?analytics=true&timeRange=${e.target.value}`
-                }}
-              >
-                <option value="week">Past Week</option>
-                <option value="month">Past Month</option>
-                <option value="quarter">Past Quarter</option>
-                <option value="year">Past Year</option>
-              </select>
-              <Minus className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-slate-500 rotate-90 pointer-events-none" />
-            </div>
+            
 
             <button
               onClick={() => setShowDetailed(!showDetailed)}
@@ -210,7 +219,9 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
               </div>
             </div>
             <span className="text-3xl font-bold text-slate-900 dark:text-white block mb-1">
-              {analyticsData.weeklyActivity.reduce((sum, week) => sum + week.feedbackReceived, 0)}
+              {sessionId
+                ? (analyticsData as any).totals?.feedbackCount || 0
+                : analyticsData.weeklyActivity.reduce((sum, week) => sum + week.feedbackReceived, 0)}
             </span>
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Feedback Received</p>
           </div>
@@ -222,7 +233,9 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
               </div>
             </div>
             <span className="text-3xl font-bold text-slate-900 dark:text-white block mb-1">
-              {analyticsData.weeklyActivity.reduce((sum, week) => sum + week.feedbackGiven, 0)}
+              {sessionId
+                ? (analyticsData as any).totals?.feedbackCount || 0
+                : analyticsData.weeklyActivity.reduce((sum, week) => sum + week.feedbackGiven, 0)}
             </span>
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Feedback Given</p>
           </div>
@@ -234,9 +247,9 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
               </div>
             </div>
             <span className="text-3xl font-bold text-slate-900 dark:text-white block mb-1">
-              {analyticsData.feedbackByGroup.length}
+              {sessionId ? (analyticsData as any).participants?.engaged || 0 : analyticsData.feedbackByGroup.length}
             </span>
-            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Active Groups</p>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{sessionId ? 'Participants Engaged' : 'Active Groups'}</p>
           </div>
 
           <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all">
@@ -252,28 +265,44 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
           </div>
         </div>
 
-        {/* Feedback by Group */}
-        <div className="mb-8">
-          <h4 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-            <Users className="h-5 w-5 text-indigo-500" />
-            Feedback by Group
-          </h4>
-          <div className="space-y-3">
-            {analyticsData.feedbackByGroup.map((group) => (
-              <div key={group.groupId} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm hover:border-slate-200 dark:hover:border-slate-600 transition-all">
-                <div>
-                  <p className="font-semibold text-slate-900 dark:text-white">{group.groupName}</p>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{group.feedbackCount} feedback items</p>
-                </div>
-                <div className="text-right">
-                  <div className={`px-3 py-1 rounded-full text-xs font-bold ${getSentimentColor(group.averageSentiment)}`}>
-                    {group.averageSentiment}
+        {/* Feedback by Group (hidden for session view) */}
+        {!sessionId && (
+          <div className="mb-8">
+            <h4 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+              <Users className="h-5 w-5 text-indigo-500" />
+              Feedback by Group
+            </h4>
+            <div className="space-y-3">
+              {analyticsData.feedbackByGroup.map((group) => (
+                <div key={group.groupId} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm border border-transparent hover:border-slate-200 dark:hover:border-slate-600 transition-all">
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-white">{group.groupName}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{group.feedbackCount} feedback items</p>
+                  </div>
+                  <div className="text-right">
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold ${getSentimentColor(group.averageSentiment)}`}>
+                      {group.averageSentiment}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {sessionId && (
+          <div className="mb-8">
+            <h4 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Sentiment Distribution</h4>
+            <div className="grid sm:grid-cols-5 gap-3">
+              {['VERY_POSITIVE','POSITIVE','NEUTRAL','NEGATIVE','VERY_NEGATIVE'].map((s) => (
+                <div key={s} className={`px-3 py-2 rounded-xl text-xs font-bold text-center ${getSentimentColor(s)}`}>
+                  <div className="text-[11px] mb-1">{s}</div>
+                  <div className="text-base">{(analyticsData as any).sentimentDistribution?.[s] || 0}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Detailed View */}
         {showDetailed && (
@@ -289,10 +318,33 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center space-x-3">
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${getSentimentColor(trend.sentiment)}`}>
-                          {trend.sentiment}
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${getSentimentColor(trend.dominant)}`}>
+                          Dominant: {trend.dominant}
                         </span>
-                        <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">({trend.count} items)</span>
+                        <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">({trend.total} items)</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">
+                          {(() => {
+                            const d = trend.distribution
+                            const domCount = d?.[trend.dominant as keyof typeof d] || 0
+                            const pct = trend.total > 0 ? Math.round((domCount / trend.total) * 100) : 0
+                            return `${pct}%`
+                          })()}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(
+                          [
+                            ['VERY_POSITIVE', trend.distribution?.VERY_POSITIVE || 0],
+                            ['POSITIVE', trend.distribution?.POSITIVE || 0],
+                            ['NEUTRAL', trend.distribution?.NEUTRAL || 0],
+                            ['NEGATIVE', trend.distribution?.NEGATIVE || 0],
+                            ['VERY_NEGATIVE', trend.distribution?.VERY_NEGATIVE || 0]
+                          ] as Array<[string, number]>
+                        ).filter(([, c]) => c > 0).map(([label, c]) => (
+                          <span key={label} className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${getSentimentColor(label)}`}>
+                            {label} {c}
+                          </span>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -327,9 +379,10 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
               </div>
             </div>
 
-            {/* Top Feedback Themes */}
+            {/* Key Insights */}
             <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-              <h4 className="text-lg font-bold text-slate-900 dark:text-white mb-6">Top Feedback Themes</h4>
+              <h4 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Key Insights</h4>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Most-discussed topics with example sentences</p>
               <div className="space-y-3">
                 {analyticsData.topFeedbackThemes.map((theme, index) => (
                   <div key={theme.theme} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm border border-transparent hover:border-slate-200 dark:hover:border-slate-600 transition-all">
@@ -340,6 +393,20 @@ export function FeedbackAnalyticsReal({ timeRange }: FeedbackAnalyticsProps) {
                       <div>
                         <p className="font-semibold text-slate-900 dark:text-white">{theme.theme}</p>
                         <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{theme.count} mentions</p>
+                        {theme.examples && theme.examples.length > 0 && (
+                          <div className="mt-2 text-xs text-slate-600 dark:text-slate-300 max-w-3xl">
+                            <span className="font-medium">Example:</span> {theme.examples[0].text}
+                          </div>
+                        )}
+                        {theme.distribution && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {Object.entries(theme.distribution).filter(([, c]) => (c as number) > 0).map(([label, c]) => (
+                              <span key={label} className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getSentimentColor(label)}`}>
+                                {label} {c as number}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-bold ${getSentimentColor(theme.sentiment)}`}>

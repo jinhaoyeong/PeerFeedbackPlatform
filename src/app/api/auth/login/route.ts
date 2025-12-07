@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { AuthService } from '@/lib/auth-service'
 import { prisma } from '@/lib/prisma'
 import jwt from 'jsonwebtoken'
+import { NotificationService } from '@/lib/notifications'
 
 export const runtime = 'nodejs'
 
@@ -84,17 +85,45 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Otherwise complete login immediately
-    const token = AuthService.generateToken(userRecord.id)
+  // Otherwise complete login immediately
+  const token = AuthService.generateToken(userRecord.id)
 
-    await prisma.user.update({
-      where: { id: userRecord.id },
-      data: { lastLoginAt: new Date() }
-    })
+  await prisma.user.update({
+    where: { id: userRecord.id },
+    data: { lastLoginAt: new Date() }
+  })
 
-    await AuthService.logAuditEvent(userRecord.id, 'USER_LOGIN', 'User', userRecord.id, {
-      email: email.trim().toLowerCase()
-    })
+  await AuthService.logAuditEvent(userRecord.id, 'USER_LOGIN', 'User', userRecord.id, {
+    email: email.trim().toLowerCase()
+  })
+
+    try {
+      const ua = request.headers.get('user-agent') || 'unknown'
+      const isLocal = ipAddress === '::1' || ipAddress === '127.0.0.1' || ipAddress === '::ffff:127.0.0.1'
+      const displayIp = isLocal ? 'localhost' : ipAddress
+      let tz = 'UTC'
+      let loginAlertsEnabled = false
+      try {
+        const latest = await prisma.auditLog.findFirst({ where: { userId: userRecord.id, action: 'USER_SETTINGS' }, orderBy: { occurredAt: 'desc' } })
+        const stored = latest?.details ? JSON.parse(latest.details as string) : null
+        tz = String(stored?.timezone || 'UTC')
+        loginAlertsEnabled = !!stored?.loginAlertsEnabled
+      } catch {}
+      if (loginAlertsEnabled) {
+        const now = new Date()
+        let timeStr = now.toLocaleString('en-US')
+        try { timeStr = now.toLocaleString('en-US', { timeZone: tz }) } catch {}
+        const app = process.env.APP_NAME || 'Peer Feedback Platform'
+        const html = `<div style="font-size:15px;color:#111827"><p style="margin:0 0 10px">Hi ${userRecord.fullName},</p><p style="margin:0 0 14px">A new login to your account was detected.</p><div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px"><div style="display:flex;justify-content:space-between;line-height:1.6"><span style="color:#6b7280">IP</span><span style="font-weight:600">${displayIp}</span></div><div style="display:flex;justify-content:space-between;line-height:1.6"><span style="color:#6b7280">Device</span><span style="font-weight:600">${ua}</span></div><div style="display:flex;justify-content:space-between;line-height:1.6"><span style="color:#6b7280">Time</span><span style="font-weight:600">${timeStr} (${tz})</span></div></div><p style="margin:12px 0 0">If this wasn’t you, change your password and review settings.</p><p style="margin:6px 0 0"><a href="${process.env.NEXTAUTH_URL || ''}/settings" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 14px;border-radius:10px">Open Settings</a></p><p style="margin:10px 0 0;color:#6b7280">Sent by ${app}</p></div>`
+        await NotificationService.sendEmail(
+          userRecord.id,
+          'Login Alert',
+          `A new login to your account was detected from ${displayIp}.`,
+          html,
+          { force: true }
+        )
+      }
+    } catch {}
 
     const user = {
       id: userRecord.id,
@@ -106,12 +135,12 @@ export async function POST(request: NextRequest) {
       lastLoginAt: userRecord.lastLoginAt || undefined
     }
 
-    // Set HTTP-only cookie for better security
-    const response = NextResponse.json({
-      user,
-      token,
-      message: 'Login successful'
-    })
+  // Set HTTP-only cookie for better security
+  const response = NextResponse.json({
+    user,
+    token,
+    message: 'Login successful'
+  })
 
     response.cookies.set('auth-token', token, {
       httpOnly: true,

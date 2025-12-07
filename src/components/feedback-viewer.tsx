@@ -19,6 +19,13 @@ import {
   Search
 } from 'lucide-react'
 import { useSettings } from '@/components/settings-provider'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 interface FeedbackItem {
   id: string
@@ -28,6 +35,7 @@ interface FeedbackItem {
   sentiment: 'VERY_POSITIVE' | 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE' | 'VERY_NEGATIVE'
   submittedAt: string
   isFlagged: boolean
+  flagReason?: string
   submitterId?: string
   targetUserId: string
   targetUserName: string
@@ -105,6 +113,19 @@ export function FeedbackViewer({ feedback, userName, onFilterChange }: FeedbackV
         return 'Very Negative'
       default:
         return 'Unknown'
+    }
+  }
+
+  const getFlagReasonLabel = (reason?: string) => {
+    switch (String(reason || '').toUpperCase()) {
+      case 'INAPPROPRIATE_LANGUAGE':
+        return 'Inappropriate language'
+      case 'SPAM':
+        return 'Spam-like pattern'
+      case 'TOO_SHORT':
+        return 'Too short'
+      default:
+        return ''
     }
   }
 
@@ -283,34 +304,36 @@ export function FeedbackViewer({ feedback, userName, onFilterChange }: FeedbackV
               {/* Sort By */}
               <div>
                 <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Sort By</label>
-                <div className="relative">
-                  <select
-                    value={filters.sortBy}
-                    onChange={(e) => handleFilterChange({ sortBy: e.target.value as any })}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 appearance-none text-sm text-slate-700 dark:text-white font-medium"
-                  >
-                    <option value="date">Date</option>
-                    <option value="sentiment">Sentiment</option>
-                    <option value="relevance">Most Relevant</option>
-                  </select>
-                  <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
-                </div>
+                <Select
+                  value={filters.sortBy}
+                  onValueChange={(value) => handleFilterChange({ sortBy: value as any })}
+                >
+                  <SelectTrigger className="w-full bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700">
+                    <SelectValue placeholder="Sort by..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="date">Date</SelectItem>
+                    <SelectItem value="sentiment">Sentiment</SelectItem>
+                    <SelectItem value="relevance">Most Relevant</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Sort Order */}
               <div>
                 <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Order</label>
-                <div className="relative">
-                  <select
-                    value={filters.sortOrder}
-                    onChange={(e) => handleFilterChange({ sortOrder: e.target.value as any })}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 appearance-none text-sm text-slate-700 dark:text-white font-medium"
-                  >
-                    <option value="desc">Newest First</option>
-                    <option value="asc">Oldest First</option>
-                  </select>
-                  <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
-                </div>
+                <Select
+                  value={filters.sortOrder}
+                  onValueChange={(value) => handleFilterChange({ sortOrder: value as any })}
+                >
+                  <SelectTrigger className="w-full bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700">
+                    <SelectValue placeholder="Order..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="desc">Newest First</SelectItem>
+                    <SelectItem value="asc">Oldest First</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
@@ -354,7 +377,7 @@ export function FeedbackViewer({ feedback, userName, onFilterChange }: FeedbackV
                       {item.isFlagged && (
                         <span className="px-2.5 py-0.5 text-xs font-bold bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800 rounded-full flex items-center">
                           <AlertCircle className="h-3 w-3 mr-1" />
-                          Flagged
+                          {`Flagged${getFlagReasonLabel(item.flagReason) ? ' — ' + getFlagReasonLabel(item.flagReason) : ''}`}
                         </span>
                       )}
                       <span className="text-slate-300 text-xs">•</span>
@@ -378,12 +401,12 @@ export function FeedbackViewer({ feedback, userName, onFilterChange }: FeedbackV
                 </button>
               </div>
 
-              {/* Content Preview */}
-              <div className={`text-slate-700 dark:text-slate-300 leading-relaxed text-sm ${!expandedItems.has(item.id) && 'line-clamp-2'}`}>
-                {item.content}
-              </div>
-
-              {/* Full Content */}
+              {/* Content */}
+              {!expandedItems.has(item.id) && (
+                <div className="text-slate-700 dark:text-slate-300 leading-relaxed text-sm line-clamp-2">
+                  {item.content}
+                </div>
+              )}
               {expandedItems.has(item.id) && (
                 <div className="mt-4 text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap bg-slate-50 dark:bg-slate-900/50 p-5 rounded-xl border border-slate-100 dark:border-slate-800 shadow-inner">
                   {item.content}
@@ -398,8 +421,10 @@ export function FeedbackViewer({ feedback, userName, onFilterChange }: FeedbackV
                 </div>
                 <div className="flex items-center space-x-2">
                   <User className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+                  <span>{item.submitterId ? 'Submitted by you' : 'Submitted by peer'}</span>
+                  <span className="text-slate-300">•</span>
                   <span>
-                    {item.submitterId ? 'Submitted by you' : 'Submitted by peer'}
+                    Given to: <span className="text-slate-700 dark:text-slate-300">{item.targetUserName}</span>
                   </span>
                 </div>
               </div>

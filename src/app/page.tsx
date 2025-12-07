@@ -5,6 +5,7 @@ import { useAuth } from '@/components/auth-provider'
 import { AuthForm } from '@/components/auth-form'
 import { Footer } from '@/components/landing/footer'
 import { HeroSection } from '@/components/landing/hero-section'
+import { SecondaryHeroSection } from '@/components/landing/secondary-hero-section'
 import { FeaturesSection } from '@/components/landing/features-section'
 import { MessageSquare, CheckCircle2 } from 'lucide-react'
 import { motion } from 'framer-motion'
@@ -31,11 +32,25 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 relative selection:bg-blue-100 dark:selection:bg-blue-900/30">
-      {/* Animated Background */}
+      {/* Animated Background - Fixed to viewport but layered behind */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-200 dark:bg-blue-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob"></div>
-        <div className="absolute top-0 right-1/4 w-96 h-96 bg-sky-200 dark:bg-sky-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob" style={{ animationDelay: '2s' }}></div>
-        <div className="absolute -bottom-32 left-1/3 w-96 h-96 bg-indigo-200 dark:bg-indigo-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob" style={{ animationDelay: '4s' }}></div>
+        {/* Top Left - Blue */}
+        <div className="absolute -top-20 -left-20 w-[40rem] h-[40rem] bg-blue-200 dark:bg-blue-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob"></div>
+        
+        {/* Top Right - Sky */}
+        <div className="absolute top-0 -right-20 w-[35rem] h-[35rem] bg-sky-200 dark:bg-sky-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
+        
+        {/* Middle Left - Indigo */}
+        <div className="absolute top-[40%] -left-20 w-[45rem] h-[45rem] bg-indigo-200 dark:bg-indigo-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+        
+        {/* Middle Right - Purple */}
+        <div className="absolute top-[30%] -right-32 w-[38rem] h-[38rem] bg-purple-200 dark:bg-purple-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
+        
+        {/* Bottom Left - Blue */}
+        <div className="absolute -bottom-32 left-0 w-[40rem] h-[40rem] bg-blue-200 dark:bg-blue-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob"></div>
+        
+        {/* Bottom Right - Cyan */}
+        <div className="absolute -bottom-40 -right-20 w-[40rem] h-[40rem] bg-cyan-200 dark:bg-cyan-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
       </div>
 
       {/* Navigation */}
@@ -67,18 +82,14 @@ export default function HomePage() {
       </nav>
 
       <main>
+        <SecondaryHeroSection />
+
         <HeroSection />
-        
+
         <FeaturesSection />
 
         {/* Auth Section */}
-        <section id="auth" className="py-24 bg-gradient-to-b from-white to-blue-50/50 dark:from-slate-950 dark:to-slate-900 relative overflow-hidden">
-          {/* Background decoration */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full overflow-hidden pointer-events-none">
-            <div className="absolute top-[20%] left-[10%] w-72 h-72 bg-sky-200 dark:bg-sky-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob"></div>
-            <div className="absolute top-[20%] right-[10%] w-72 h-72 bg-blue-200 dark:bg-blue-900/20 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
-          </div>
-
+        <section id="auth" className="py-24 relative overflow-hidden z-10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
             <div className="grid lg:grid-cols-2 gap-16 items-center">
               <motion.div 

@@ -32,7 +32,7 @@ export function FeedbackForm({
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const minCharacters = 10
-  const maxCharacters = 500
+  const maxCharacters = 2500
 
   const allowAnonymousComputed = useMemo(() => {
     try {
@@ -147,6 +147,13 @@ export function FeedbackForm({
           </div>
           <span className="font-medium">{effectiveAllowAnonymous ? 'This feedback can be submitted anonymously' : 'Your name will be visible to the recipient'}</span>
         </div>
+
+        {!effectiveAllowAnonymous && (
+          <div className="flex items-start space-x-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 p-3 rounded-xl border border-red-100 dark:border-red-800">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            <span className="font-medium">This feedback will include your name. It is not anonymous.</span>
+          </div>
+        )}
 
         {/* Feedback Textarea */}
         <div>

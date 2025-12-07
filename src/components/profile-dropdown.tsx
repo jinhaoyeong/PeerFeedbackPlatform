@@ -2,7 +2,7 @@
 
 import { useState, isValidElement, cloneElement } from 'react'
 import { useRouter } from 'next/navigation'
-import { User, Settings, LogOut, UserCircle, Shield, CreditCard } from 'lucide-react'
+import { User, Settings, LogOut, UserCircle, Shield } from 'lucide-react'
 import { useAuth } from './auth-provider'
 
 interface ProfileDropdownProps {
@@ -108,13 +108,7 @@ export function ProfileDropdown({ trigger }: ProfileDropdownProps) {
                 <span className="text-sm font-medium">Privacy & Security</span>
               </button>
 
-              <button
-                onClick={() => navigateTo('/billing')}
-                className="w-full flex items-center space-x-3 px-4 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-xl transition-all duration-200"
-              >
-                <CreditCard className="h-4.5 w-4.5" />
-                <span className="text-sm font-medium">Billing & Subscription</span>
-              </button>
+              
             </div>
 
             {/* Divider */}

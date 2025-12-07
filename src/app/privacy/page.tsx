@@ -6,6 +6,13 @@ import { Shield, Lock, Eye, AlertCircle, Check, Download, ArrowLeft, CheckCircle
 import { useAuth } from '@/components/auth-provider'
 import { useSettings } from '@/components/settings-provider'
 import * as SwitchPrimitive from '@radix-ui/react-switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 type Message = { type: 'success' | 'error', text: string }
 
@@ -16,7 +23,6 @@ type PrivacySettings = {
 
 type OtherSettings = {
   loginAlertsEnabled: boolean
-  showActivityStatus: boolean
   profileVisibility: 'public' | 'group-members' | 'private'
   darkMode?: boolean
   language?: string
@@ -25,7 +31,7 @@ type OtherSettings = {
 }
 
 export default function PrivacyPage() {
-  const { user, token } = useAuth()
+  const { user, token, twoFATempToken } = useAuth()
   const { language, timezone, saveSettings, features } = useSettings()
   const router = useRouter()
   const [message, setMessage] = useState<Message | null>(null)
@@ -34,7 +40,7 @@ export default function PrivacyPage() {
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [sessions, setSessions] = useState<Array<{ id: string, action: string, occurredAt: string, details?: { email?: string } }>>([])
   const [privacy, setPrivacy] = useState<PrivacySettings>({ allowAnonymousFeedback: false, showInGroupDirectory: true })
-  const [other, setOther] = useState<OtherSettings>({ loginAlertsEnabled: false, showActivityStatus: true, profileVisibility: 'group-members' })
+  const [other, setOther] = useState<OtherSettings>({ loginAlertsEnabled: false, profileVisibility: 'group-members' })
   const [version, setVersion] = useState<number | null>(null)
   const [originalPrivacy, setOriginalPrivacy] = useState<PrivacySettings | null>(null)
   const [originalOther, setOriginalOther] = useState<OtherSettings | null>(null)
@@ -42,6 +48,8 @@ export default function PrivacyPage() {
   const [twoFAQr, setTwoFAQr] = useState<string>('')
   const [twoFAVisible, setTwoFAVisible] = useState(false)
   const [twoFACode, setTwoFACode] = useState('')
+  const [twoFAMethod, setTwoFAMethod] = useState<'totp' | 'email'>('totp')
+  const [modalMessage, setModalMessage] = useState<Message | null>(null)
 
   useEffect(() => {
     if (!user) return
@@ -63,7 +71,6 @@ export default function PrivacyPage() {
       }
       const nextOther = {
         loginAlertsEnabled: !!s.loginAlertsEnabled,
-        showActivityStatus: !!s.showActivityStatus,
         profileVisibility: (s.profileVisibility || 'group-members') as OtherSettings['profileVisibility'],
         language,
         timezone,
@@ -97,7 +104,6 @@ export default function PrivacyPage() {
           },
           otherSettings: {
             loginAlertsEnabled: nextOther.loginAlertsEnabled,
-            showActivityStatus: nextOther.showActivityStatus,
             profileVisibility: nextOther.profileVisibility,
             darkMode: typeof nextOther.darkMode !== 'undefined' ? !!nextOther.darkMode : currentDark,
             language: nextOther.language,
@@ -149,21 +155,24 @@ export default function PrivacyPage() {
   const handleToggle2FA = async (enabled: boolean) => {
     setMessage(null)
     if (enabled) {
-      try {
-        const res = await fetch('/api/user/2fa', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ action: 'init' })
-        })
-        const data = await res.json()
-        if (res.ok) {
-          setTwoFAQr(data.qr)
-          setTwoFAVisible(true)
-        } else {
-          setMessage({ type: 'error', text: data.error || 'Failed to start 2FA setup' })
+      setTwoFAVisible(true)
+      setModalMessage(null)
+      if (twoFAMethod === 'totp') {
+        try {
+          const res = await fetch('/api/user/2fa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ action: 'init' })
+          })
+          const data = await res.json()
+          if (res.ok) {
+            setTwoFAQr(data.qr)
+          } else {
+            setModalMessage({ type: 'error', text: data.error || 'Failed to start 2FA setup' })
+          }
+        } catch {
+          setModalMessage({ type: 'error', text: 'Failed to start 2FA setup' })
         }
-      } catch {
-        setMessage({ type: 'error', text: 'Failed to start 2FA setup' })
       }
     } else {
       try {
@@ -186,11 +195,12 @@ export default function PrivacyPage() {
   }
 
   const handleVerify2FA = async () => {
+    setModalMessage(null)
     try {
       const res = await fetch('/api/user/2fa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ action: 'verify', code: twoFACode })
+        body: JSON.stringify({ action: twoFAMethod === 'totp' ? 'verify' : 'email-verify', code: twoFACode })
       })
       const data = await res.json()
       if (res.ok) {
@@ -199,10 +209,10 @@ export default function PrivacyPage() {
         setTwoFAEnabled(true)
         setMessage({ type: 'success', text: 'Two-factor authentication enabled' })
       } else {
-        setMessage({ type: 'error', text: data.error || 'Invalid code' })
+        setModalMessage({ type: 'error', text: data.error || 'Invalid code' })
       }
     } catch {
-      setMessage({ type: 'error', text: 'Failed to verify 2FA' })
+      setModalMessage({ type: 'error', text: 'Failed to verify 2FA' })
     }
   }
 
@@ -362,7 +372,7 @@ export default function PrivacyPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-semibold text-slate-900 dark:text-white text-lg">Login Alerts</h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Email alerts for new logins</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Email alerts for new logins (requires Settings → Email Notifications ON)</p>
                   </div>
                   <SwitchPrimitive.Root disabled={loading} className="w-11 h-6 bg-slate-200 dark:bg-slate-700 rounded-full relative data-[state=checked]:bg-indigo-600" checked={other.loginAlertsEnabled} onCheckedChange={(c) => onOtherToggle('loginAlertsEnabled', c)}>
                     <SwitchPrimitive.Thumb className="block h-5 w-5 rounded-full bg-white shadow transition-transform translate-x-0 data-[state=checked]:translate-x-5" />
@@ -385,21 +395,22 @@ export default function PrivacyPage() {
                   <h3 className="font-semibold text-slate-900 dark:text-white text-lg">Profile Visibility</h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400">Control who can see your profile information</p>
                 </div>
-                <select disabled={loading} value={other.profileVisibility} onChange={(e) => onOtherToggle('profileVisibility', e.target.value as OtherSettings['profileVisibility'])} className="px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300">
-                  <option value="public">Public</option>
-                  <option value="group-members">Group Members Only</option>
-                  <option value="private">Private</option>
-                </select>
+                <Select
+                  disabled={loading}
+                  value={other.profileVisibility}
+                  onValueChange={(value) => onOtherToggle('profileVisibility', value as OtherSettings['profileVisibility'])}
+                >
+                  <SelectTrigger className="w-[200px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700">
+                    <SelectValue placeholder="Select visibility" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="public">Public</SelectItem>
+                    <SelectItem value="group-members">Group Members Only</SelectItem>
+                    <SelectItem value="private">Private</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="flex items-center justify-between p-6 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
-                <div>
-                  <h3 className="font-semibold text-slate-900 dark:text-white text-lg">Activity Status</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">Show when you're active</p>
-                </div>
-                <SwitchPrimitive.Root disabled={loading} className="w-11 h-6 bg-slate-200 dark:bg-slate-700 rounded-full relative data-[state=checked]:bg-indigo-600" checked={other.showActivityStatus} onCheckedChange={(c) => onOtherToggle('showActivityStatus', c)}>
-                  <SwitchPrimitive.Thumb className="block h-5 w-5 rounded-full bg-white shadow transition-transform translate-x-0 data-[state=checked]:translate-x-5" />
-                </SwitchPrimitive.Root>
-              </div>
+              
               <div className="flex items-center justify-between p-6 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
                 <div>
                   <h3 className="font-semibold text-slate-900 dark:text-white text-lg">Allow Messaging</h3>
@@ -459,9 +470,49 @@ export default function PrivacyPage() {
                 <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Set up Two-Factor Authentication</h3>
               </div>
               <div className="space-y-4">
-                <div className="p-4 bg-white dark:bg-white rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                  <img src={twoFAQr} alt="Authenticator QR code" className="mx-auto" />
+                {modalMessage && (
+                  <div className={`p-3 rounded-lg flex items-center border ${modalMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'}`}>
+                    {modalMessage.type === 'success' ? <CheckCircle className="h-4 w-4 mr-2" /> : <AlertCircle className="h-4 w-4 mr-2" />}
+                    <span className="text-sm">{modalMessage.text}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-center gap-3">
+                  <button
+                    onClick={async () => {
+                      setTwoFAMethod('totp')
+                      try {
+                        const res = await fetch('/api/user/2fa', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                          body: JSON.stringify({ action: 'init' })
+                        })
+                        const data = await res.json()
+                        if (res.ok) setTwoFAQr(data.qr)
+                      } catch {}
+                    }}
+                    className={`px-3 py-1.5 rounded-lg border ${twoFAMethod === 'totp' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'}`}
+                  >
+                    Authenticator App
+                  </button>
+                  <button
+                    onClick={() => setTwoFAMethod('email')}
+                    className={`px-3 py-1.5 rounded-lg border ${twoFAMethod === 'email' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'}`}
+                  >
+                    Email Code
+                  </button>
                 </div>
+                {twoFAMethod === 'totp' && (
+                  <div className="p-4 bg-white dark:bg-white rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm min-h-[160px] flex items-center justify-center">
+                    {twoFAQr ? (
+                      <img src={twoFAQr} alt="Authenticator QR code" className="mx-auto" />
+                    ) : (
+                      <div className="flex flex-col items-center text-slate-500">
+                        <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-2"></div>
+                        <span className="text-sm">Loading QR...</span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Enter 6-digit code</label>
                   <input
@@ -489,21 +540,26 @@ export default function PrivacyPage() {
                   </button>
                 </div>
                 <div className="mt-2 text-center">
-                  <button
-                    onClick={async () => {
-                      try {
-                        await fetch('/api/user/2fa', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                          body: JSON.stringify({ action: 'fallback', method: 'email' })
-                        })
-                        setMessage({ type: 'success', text: 'Fallback code sent to email' })
-                      } catch {}
-                    }}
-                    className="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline transition-colors"
-                  >
-                    Send fallback code to email
-                  </button>
+                  {twoFAMethod === 'email' && (
+                    <button
+                      onClick={async () => {
+                        setModalMessage(null)
+                        try {
+                          await fetch('/api/user/2fa', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ action: 'email-init' })
+                          })
+                          setModalMessage({ type: 'success', text: 'Verification code sent to email' })
+                        } catch {
+                          setModalMessage({ type: 'error', text: 'Failed to send verification code' })
+                        }
+                      }}
+                      className="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline transition-colors"
+                    >
+                      Send verification code to email
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

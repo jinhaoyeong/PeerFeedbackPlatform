@@ -23,10 +23,18 @@ import { useAuth } from '@/components/auth-provider'
 import { apiClient } from '@/lib/api-client'
 import { FeedbackAnalyticsReal } from '@/components/feedback-analytics-real'
 import { FeedbackForm } from '@/components/feedback-form'
+import { FeedbackViewer } from '@/components/feedback-viewer'
 import { useSettings } from '@/components/settings-provider'
 import { useSocket } from '@/components/socket-provider'
 import { useNotifications } from '@/components/notification-provider'
 import { GroupSettingsPopup } from '@/components/group-settings-popup'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { MemberActionsDropdown } from '@/components/member-actions-dropdown'
 import { SessionActionsDropdown } from '@/components/session-actions-dropdown'
 import { SessionForm } from '@/components/feedback-session-manager'
@@ -62,6 +70,8 @@ interface Session {
   status: 'ACTIVE' | 'CLOSED' | 'DRAFT'
   startsAt?: string
   endsAt?: string
+  createdAt?: string
+  updatedAt?: string
   participantCount: number
   feedbackCount: number
 }
@@ -88,7 +98,7 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
   const [newSessionEndsAt, setNewSessionEndsAt] = useState('')
   const [newAllowSelfFeedback, setNewAllowSelfFeedback] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
-  const [analyticsTimeRange, setAnalyticsTimeRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month')
+  
   const [showFeedbackModal, setShowFeedbackModal] = useState(false)
   const [feedbackSessionId, setFeedbackSessionId] = useState<string | null>(null)
   const [feedbackSessionTitle, setFeedbackSessionTitle] = useState<string>('')
@@ -105,11 +115,19 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
   const [leavingGroup, setLeavingGroup] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [analyticsSessionId, setAnalyticsSessionId] = useState<string | null>(null)
+  const [editingSession, setEditingSession] = useState<any | null>(null)
   const [showChatModal, setShowChatModal] = useState(false)
   const [chatRecipient, setChatRecipient] = useState<{ id: string, username?: string, fullName?: string } | null>(null)
   const [chatMessages, setChatMessages] = useState<Array<{ id?: string, fromUserId: string, content: string, timestamp: string }>>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
+  
+  // Session Feedback Viewing State
+  const [viewingFeedbackSessionId, setViewingFeedbackSessionId] = useState<string | null>(null)
+  const [sessionFeedback, setSessionFeedback] = useState<any[]>([])
+  const [loadingFeedback, setLoadingFeedback] = useState(false)
+  const [errorFeedback, setErrorFeedback] = useState<string | null>(null)
 
   const totalFeedback = useMemo(() => {
     try {
@@ -299,6 +317,8 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
           status: s.status,
           startsAt: s.startsAt ? String(s.startsAt) : undefined,
           endsAt: s.endsAt ? String(s.endsAt) : undefined,
+          createdAt: s.createdAt ? String(s.createdAt) : undefined,
+          updatedAt: s.updatedAt ? String(s.updatedAt) : undefined,
           participantCount: Array.isArray(s.submissions)
             ? new Set(s.submissions.map((x: any) => x.targetUser?.id)).size
             : 0,
@@ -448,6 +468,70 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
     } catch {}
   }
 
+  const handleViewSessionFeedback = async (sessionId: string) => {
+    track('GROUP_DETAILS_VIEW_SESSION_FEEDBACK_CLICK', { groupId: group.id, sessionId })
+    setViewingFeedbackSessionId(sessionId)
+    setLoadingFeedback(true)
+    setErrorFeedback(null)
+    setSessionFeedback([])
+    
+    // Switch to sessions tab to show the feedback interface
+    setActiveTab('sessions')
+    
+    try {
+      const res = await apiClient.getSessionFeedback(sessionId)
+      const feedback = (res as any)?.feedback || []
+      const title = sessions.find(s => s.id === sessionId)?.title || ''
+      const formatted = feedback.map((f: any) => ({
+        id: f.id,
+        sessionId: f.sessionId,
+        sessionTitle: title,
+        content: f.content,
+        sentiment: f.sentiment || 'NEUTRAL',
+        submittedAt: String(f.submittedAt),
+        isFlagged: !!f.isFlagged,
+        flagReason: f.flagReason || undefined,
+        submitterId: f.submitterId || undefined,
+        targetUserId: f.targetUser?.id,
+        targetUserName: f.targetUser?.fullName || f.targetUser?.username || 'Member'
+      }))
+      setSessionFeedback(formatted)
+    } catch (e: any) {
+      setErrorFeedback(e?.message || 'Failed to load feedback')
+    } finally {
+      setLoadingFeedback(false)
+    }
+  }
+
+  const startSession = async (sessionId: string) => {
+    try {
+      await apiClient.updateSessionStatus(sessionId, 'ACTIVE')
+      const res = await apiClient.getSessions(group.id)
+      const list = (res as any)?.sessions || []
+      const mapped: Session[] = list.map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        status: s.status,
+        startsAt: s.startsAt ? String(s.startsAt) : undefined,
+        endsAt: s.endsAt ? String(s.endsAt) : undefined,
+        createdAt: s.createdAt ? String(s.createdAt) : undefined,
+        updatedAt: s.updatedAt ? String(s.updatedAt) : undefined,
+        participantCount: Array.isArray(s.submissions)
+          ? new Set([
+              ...s.submissions.map((x: any) => x.targetUser?.id).filter(Boolean),
+              ...s.submissions.map((x: any) => x.submitterId).filter(Boolean)
+            ]).size
+          : 0,
+        feedbackCount: typeof s.submissionCount === 'number' ? s.submissionCount : (Array.isArray(s.submissions) ? s.submissions.length : 0)
+      }))
+      setSessions(mapped)
+      setActiveTab('sessions')
+      track('SESSION_START', { groupId: group.id, sessionId })
+    } catch (e: any) {
+      toast({ title: 'Failed to start session', description: e?.message || 'Please try again' })
+    }
+  }
+
   const handleStartSession = () => {
     track('GROUP_DETAILS_START_SESSION_CLICK', { groupId: group.id })
     if (!isAdmin) return
@@ -545,8 +629,11 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
           status: localSession.status,
           startsAt: localSession.startsAt,
           endsAt: localSession.endsAt,
+          createdAt: localSession.createdAt,
+          updatedAt: localSession.updatedAt,
           participantCount: localSession.participantCount,
-          feedbackCount: localSession.feedbackCount
+          feedbackCount: localSession.feedbackCount,
+          submissionCount: localSession.feedbackCount
         })
         return
       }
@@ -584,6 +671,8 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
           status: created.status,
           startsAt: created.startsAt ? String(created.startsAt) : undefined,
           endsAt: created.endsAt ? String(created.endsAt) : undefined,
+          createdAt: created.createdAt ? String(created.createdAt) : undefined,
+          updatedAt: created.updatedAt ? String(created.updatedAt) : undefined,
           participantCount: 0,
           feedbackCount: typeof created.submissionCount === 'number' ? created.submissionCount : 0
         }
@@ -804,22 +893,10 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
                         <button
                           aria-label={`Enter session ${session.title}`}
                           onClick={() => {
-                            if (session.status === 'ACTIVE') {
-                              setFeedbackSessionId(session.id)
-                              setFeedbackSessionTitle(session.title)
-                              // Set a default target or show the modal to select
-                              const firstMember = members.find(m => m.id !== user?.id)
-                              if (firstMember) {
-                                setFeedbackTargetId(firstMember.id)
-                                setFeedbackTargetName(firstMember.fullName || firstMember.username || 'Member')
-                              }
-                              setShowFeedbackModal(true)
-                            } else {
-                              // For inactive sessions, show details
-                              handleViewSessionDetails(session.id)
-                            }
+                            handleViewSessionFeedback(session.id)
                           }}
-                          className="ml-4 p-2 text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
+                          disabled={session.status === 'DRAFT'}
+                          className={`ml-4 p-2 rounded-lg transition-all ${session.status === 'DRAFT' ? 'text-slate-300 dark:text-slate-600 cursor-not-allowed' : 'text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}
                         >
                           <ChevronRight className="h-5 w-5" />
                         </button>
@@ -1020,7 +1097,35 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
         )}
 
         {!errorGroup && activeTab === 'sessions' && (
-          <div className="space-y-6">
+          viewingFeedbackSessionId ? (
+             <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+               <div className="flex items-center space-x-4 mb-6">
+                 <button
+                   onClick={() => setViewingFeedbackSessionId(null)}
+                   className="flex items-center space-x-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+                 >
+                   <ChevronRight className="h-5 w-5 rotate-180" />
+                   <span className="font-medium">Back to Sessions</span>
+                 </button>
+               </div>
+               
+               {loadingFeedback ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400" />
+                  </div>
+               ) : errorFeedback ? (
+                  <div className="p-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl border border-red-100 dark:border-red-800">
+                    {errorFeedback}
+                  </div>
+               ) : (
+                  <FeedbackViewer 
+                    feedback={sessionFeedback} 
+                    userName={user?.fullName || user?.username || 'User'}
+                  />
+               )}
+             </div>
+          ) : (
+          <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Feedback Sessions</h3>
               <button
@@ -1074,23 +1179,53 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
                           status: s.status,
                           startsAt: s.startsAt ? String(s.startsAt) : undefined,
                           endsAt: s.endsAt ? String(s.endsAt) : undefined,
+                          createdAt: s.createdAt ? String(s.createdAt) : undefined,
+                          updatedAt: s.updatedAt ? String(s.updatedAt) : undefined,
                           participantCount: Array.isArray(s.submissions)
-                            ? new Set(s.submissions.map((x: any) => x.targetUser?.id)).size
+                            ? new Set([
+                                ...s.submissions.map((x: any) => x.targetUser?.id).filter(Boolean),
+                                ...s.submissions.map((x: any) => x.submitterId).filter(Boolean)
+                              ]).size
                             : 0,
                           feedbackCount: typeof s.submissionCount === 'number' ? s.submissionCount : (Array.isArray(s.submissions) ? s.submissions.length : 0)
                         }))
                         setSessions(mapped)
                       }}
-                      onEdit={() => {
-                        // Edit session - open modal with session data
-                        setNewSessionTitle(session.title)
-                        setNewSessionDescription('') // Session doesn't have description property
-                        setShowCreateModal(true)
+                      onEdit={async () => {
+                        try {
+                          const res = await apiClient.getSession(session.id)
+                          const s: any = (res as any)?.session || res
+                          const mapped: any = {
+                            id: s.id,
+                            title: s.title,
+                            description: s.description || '',
+                            status: s.status,
+                            startTime: s.startsAt ? new Date(s.startsAt) : undefined,
+                            endTime: s.endsAt ? new Date(s.endsAt) : undefined,
+                            participantCount: Array.isArray(s.submissions)
+                              ? new Set([
+                                  ...s.submissions.map((x: any) => x.targetUser?.id).filter(Boolean),
+                                  ...s.submissions.map((x: any) => x.submitterId).filter(Boolean)
+                                ]).size
+                              : 0,
+                            feedbackCount: typeof s.submissionCount === 'number' ? s.submissionCount : (Array.isArray(s.submissions) ? s.submissions.length : 0),
+                            targetUsers: (members || []).map(m => ({ id: m.id, name: m.fullName || m.username || 'Member', email: '', feedbackGiven: false })),
+                            settings: { allowAnonymous: s.settings?.allowAnonymous !== false, minFeedbackLength: 50, maxFeedbackLength: 2500, autoClose: false, reminderFrequency: 'none' as const },
+                            allowSelfFeedback: s.allowSelfFeedback === true,
+                            createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
+                            createdBy: ''
+                          }
+                          setEditingSession(mapped)
+                          setShowCreateModal(true)
+                        } catch {
+                          setEditingSession({ id: session.id, title: session.title, description: '', status: session.status, targetUsers: [], allowSelfFeedback: false, settings: { allowAnonymous: true, minFeedbackLength: 50, maxFeedbackLength: 2500, autoClose: false, reminderFrequency: 'none' as const }, participantCount: session.participantCount, feedbackCount: session.feedbackCount, createdAt: new Date(), createdBy: '' })
+                          setShowCreateModal(true)
+                        }
                       }}
                       onViewDetails={() => handleViewSessionDetails(session.id)}
-                      onViewAnalytics={() => {
+                      onViewAnalytics={(sid: string) => {
                         setShowAnalytics(true)
-                        setAnalyticsTimeRange('month')
+                        setAnalyticsSessionId(sid)
                       }}
                     />
                   </div>
@@ -1115,69 +1250,128 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
                   </div>
 
                   {session.status === 'ACTIVE' ? (
+                    <div className="space-y-3">
+                      <button
+                        aria-label={`Give feedback for ${session.title}`}
+                        onClick={() => {
+                          const others = members.filter(m => m.id !== user?.id)
+                          const defaultTarget = others[0]
+                          setFeedbackTargetId(defaultTarget?.id || '')
+                          setFeedbackTargetName(defaultTarget ? (defaultTarget.fullName || defaultTarget.username || 'Member') : '')
+                          setFeedbackSessionId(session.id)
+                          setFeedbackSessionTitle(session.title)
+                          setShowFeedbackModal(true)
+                        }}
+                        disabled={members.filter(m => m.id !== user?.id).length === 0}
+                        className="w-full px-4 py-2.5 text-sm font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-100 dark:border-indigo-800"
+                      >
+                        Give Feedback
+                      </button>
+                      <button
+                        aria-label={`View feedback for ${session.title}`}
+                        onClick={() => handleViewSessionFeedback(session.id)}
+                        className="w-full px-4 py-2.5 text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                      >
+                        View Feedback
+                      </button>
+                    </div>
+                  ) : session.status === 'CLOSED' ? (
                     <button
-                      aria-label={`Give feedback for ${session.title}`}
-                      onClick={() => {
-                        const others = members.filter(m => m.id !== user?.id)
-                        const defaultTarget = others[0]
-                        setFeedbackTargetId(defaultTarget?.id || '')
-                        setFeedbackTargetName(defaultTarget ? (defaultTarget.fullName || defaultTarget.username || 'Member') : '')
-                        setFeedbackSessionId(session.id)
-                        setFeedbackSessionTitle(session.title)
-                        setShowFeedbackModal(true)
-                      }}
-                      disabled={members.filter(m => m.id !== user?.id).length === 0}
-                      className="w-full px-4 py-2.5 text-sm font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-100 dark:border-indigo-800"
-                    >
-                      Give Feedback
-                    </button>
-                  ) : (
-                    <button
-                      aria-label={`View details for ${session.title}`}
-                      onClick={() => handleViewSessionDetails(session.id)}
+                      aria-label={`View feedback for ${session.title}`}
+                      onClick={() => handleViewSessionFeedback(session.id)}
                       className="w-full px-4 py-2.5 text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                     >
-                      View Details
+                      View Session
                     </button>
+                  ) : (
+                    isAdmin ? (
+                      <button
+                        aria-label={`Start ${session.title}`}
+                        onClick={() => startSession(session.id)}
+                        className="w-full px-4 py-2.5 text-sm font-medium bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors"
+                      >
+                        Start Session
+                      </button>
+                    ) : (
+                      <button
+                        aria-label={`Session ${session.title} is not started`}
+                        disabled
+                        className="w-full px-4 py-2.5 text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 rounded-xl"
+                      >
+                        Not Started
+                      </button>
+                    )
                   )}
                 </div>
               ))}
             </div>
           </div>
+          )
         )}
 
         {showCreateModal && mounted && (typeof document !== 'undefined') && require('react-dom').createPortal(
           <SessionForm
-            session={null}
+            session={editingSession}
             groupMembers={(members || []).map(m => ({ id: m.id, name: m.fullName || m.username || 'Member', email: '', role: m.role }))}
-            onClose={() => setShowCreateModal(false)}
+            onClose={() => { setShowCreateModal(false); setEditingSession(null) }}
             onSubmit={async (sessionData: any) => {
               try {
                 setCreatingSession(true)
                 setCreateError(null)
-                const payload = {
-                  groupId: group.id,
-                  title: sessionData.title?.trim() || '',
-                  description: sessionData.description?.trim() || undefined,
-                  startsAt: undefined,
-                  endsAt: undefined,
-                  allowSelfFeedback: !!sessionData.allowSelfFeedback,
-                  allowAnonymousFeedback: sessionData.settings?.allowAnonymous ?? true
-                }
-                const res = await apiClient.createSession(payload)
-                const created = (res as any)?.session
-                if (created) {
-                  const mapped: any = {
-                    id: created.id,
-                    title: created.title,
-                    status: created.status,
-                    startsAt: created.startsAt ? String(created.startsAt) : undefined,
-                    endsAt: created.endsAt ? String(created.endsAt) : undefined,
-                    participantCount: 0,
-                    feedbackCount: typeof created.submissionCount === 'number' ? created.submissionCount : 0
+                if (editingSession && editingSession.id) {
+                  const updatePayload = {
+                    title: sessionData.title?.trim() || '',
+                    description: sessionData.description?.trim() || undefined,
+                    allowSelfFeedback: !!sessionData.allowSelfFeedback,
+                    allowAnonymousFeedback: sessionData.settings?.allowAnonymous ?? true
                   }
-                  setSessions(prev => [mapped, ...prev])
-                  setShowCreateModal(false)
+                  const res = await apiClient.updateSession(editingSession.id, updatePayload)
+                  const updated = (res as any)?.session
+                  if (updated) {
+                    const mapped: any = {
+                      id: updated.id,
+                      title: updated.title,
+                      status: updated.status,
+                      startsAt: updated.startsAt ? String(updated.startsAt) : undefined,
+                      endsAt: updated.endsAt ? String(updated.endsAt) : undefined,
+                      createdAt: updated.createdAt ? String(updated.createdAt) : undefined,
+                      updatedAt: updated.updatedAt ? String(updated.updatedAt) : undefined,
+                      participantCount: Array.isArray(updated.submissions)
+                        ? new Set(updated.submissions.map((x: any) => x.targetUser?.id)).size
+                        : 0,
+                      feedbackCount: typeof updated.submissionCount === 'number' ? updated.submissionCount : (Array.isArray(updated.submissions) ? updated.submissions.length : 0)
+                    }
+                    setSessions(prev => prev.map(s => s.id === mapped.id ? mapped : s))
+                    setShowCreateModal(false)
+                    setEditingSession(null)
+                  }
+                } else {
+                  const payload = {
+                    groupId: group.id,
+                    title: sessionData.title?.trim() || '',
+                    description: sessionData.description?.trim() || undefined,
+                    startsAt: undefined,
+                    endsAt: undefined,
+                    allowSelfFeedback: !!sessionData.allowSelfFeedback,
+                    allowAnonymousFeedback: sessionData.settings?.allowAnonymous ?? true
+                  }
+                  const res = await apiClient.createSession(payload)
+                  const created = (res as any)?.session
+                  if (created) {
+                    const mapped: any = {
+                      id: created.id,
+                      title: created.title,
+                      status: created.status,
+                      startsAt: created.startsAt ? String(created.startsAt) : undefined,
+                      endsAt: created.endsAt ? String(created.endsAt) : undefined,
+                      createdAt: created.createdAt ? String(created.createdAt) : undefined,
+                      updatedAt: created.updatedAt ? String(created.updatedAt) : undefined,
+                      participantCount: 0,
+                      feedbackCount: typeof created.submissionCount === 'number' ? created.submissionCount : 0
+                    }
+                    setSessions(prev => [mapped, ...prev])
+                    setShowCreateModal(false)
+                  }
                 }
               } catch (e: any) {
                 setCreateError(e?.message || 'Failed to create session')
@@ -1209,28 +1403,25 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
                   <div className="mb-6">
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Select Participant</label>
                     <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Choose who you want to give feedback to.</p>
-                    <div className="relative">
-                      <select
-                        value={feedbackTargetId}
-                        onChange={(e) => {
-                          const id = e.target.value
-                          setFeedbackTargetId(id)
-                          const m = members.find(x => x.id === id)
-                          setFeedbackTargetName(m ? (m.fullName || m.username || 'Member') : '')
-                        }}
-                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all appearance-none"
-                      >
-                        {!feedbackTargetId && (
-                          <option value="">Select a participant...</option>
-                        )}
+                    <Select
+                      value={feedbackTargetId}
+                      onValueChange={(id) => {
+                        setFeedbackTargetId(id)
+                        const m = members.find(x => x.id === id)
+                        setFeedbackTargetName(m ? (m.fullName || m.username || 'Member') : '')
+                      }}
+                    >
+                      <SelectTrigger className="w-full bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700">
+                        <SelectValue placeholder="Select a participant..." />
+                      </SelectTrigger>
+                      <SelectContent>
                         {members.filter(m => m.id !== user?.id).map(m => (
-                          <option key={m.id} value={m.id}>
+                          <SelectItem key={m.id} value={m.id}>
                             {(m.fullName || m.username || 'Unknown')}{m.username ? ` (@${m.username})` : ''}
-                          </option>
+                          </SelectItem>
                         ))}
-                      </select>
-                      <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-slate-500 rotate-90 pointer-events-none" />
-                    </div>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <FeedbackForm
                     sessionId={feedbackSessionId}
@@ -1249,6 +1440,8 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
                         status: s.status,
                         startsAt: s.startsAt ? String(s.startsAt) : undefined,
                         endsAt: s.endsAt ? String(s.endsAt) : undefined,
+                        createdAt: s.createdAt ? String(s.createdAt) : undefined,
+                        updatedAt: s.updatedAt ? String(s.updatedAt) : undefined,
                         participantCount: Array.isArray(s.submissions)
                           ? new Set(s.submissions.map((x: any) => x.targetUser?.id)).size
                           : 0,
@@ -1281,23 +1474,8 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
                   </button>
                 </div>
                 <div className="p-6">
-                  <div className="flex items-center justify-end mb-6">
-                    <div className="relative">
-                      <select
-                        value={analyticsTimeRange}
-                        onChange={(e) => setAnalyticsTimeRange(e.target.value as any)}
-                        className="pl-4 pr-10 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all appearance-none cursor-pointer"
-                      >
-                        <option value="week">Past Week</option>
-                        <option value="month">Past Month</option>
-                        <option value="quarter">Past Quarter</option>
-                        <option value="year">Past Year</option>
-                      </select>
-                      <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-slate-500 rotate-90 pointer-events-none" />
-                    </div>
+                  <FeedbackAnalyticsReal sessionId={analyticsSessionId || undefined} />
                   </div>
-                  <FeedbackAnalyticsReal timeRange={analyticsTimeRange} />
-                </div>
               </div>
             </div>
           </div>
@@ -1353,13 +1531,19 @@ export function GroupDetails({ group, onBack }: GroupDetailsProps) {
                             <div>
                               <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Starts</p>
                               <p className="text-sm font-medium text-slate-900 dark:text-white">
-                                {sessionDetails.startsAt ? new Date(sessionDetails.startsAt).toLocaleString() : 'Not set'}
+                                {sessionDetails.startsAt
+                                  ? new Date(sessionDetails.startsAt).toLocaleString()
+                                  : (sessionDetails.createdAt
+                                    ? new Date(sessionDetails.createdAt).toLocaleString()
+                                    : 'Not set')}
                               </p>
                             </div>
                             <div>
                               <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Ends</p>
                               <p className="text-sm font-medium text-slate-900 dark:text-white">
-                                {sessionDetails.endsAt ? new Date(sessionDetails.endsAt).toLocaleString() : 'Not set'}
+                                {sessionDetails.endsAt
+                                  ? new Date(sessionDetails.endsAt).toLocaleString()
+                                  : 'Not set'}
                               </p>
                             </div>
                           </div>
