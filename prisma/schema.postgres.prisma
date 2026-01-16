@@ -1,0 +1,228 @@
+// This is your Prisma schema file for PostgreSQL (Deployment)
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User accounts with authentication
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  username     String    @unique
+  passwordHash String
+  fullName     String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  twoFAEnabled               Boolean   @default(false)
+  twoFASecretEnc             String?
+  twoFASecretTempEnc         String?
+  twoFARecoveryCodesEnc      String?
+  twoFAFallbackMethod        String?
+  twoFAFallbackCodeHash      String?
+  twoFAFallbackCodeExpiresAt DateTime?
+
+  // Relationships
+  groupMemberships           GroupMember[]
+  feedbackSubmissionsReceived FeedbackSubmission[] @relation("FeedbackTargetUser")
+  feedbackSubmissionsGiven    FeedbackSubmission[] @relation("FeedbackSubmitterUser")
+  createdGroups               Group[]              @relation("GroupCreator")
+  Notification                Notification[]
+  sentMessages                DirectMessage[]      @relation("DM_Sender")
+  receivedMessages            DirectMessage[]      @relation("DM_Recipient")
+
+  @@map("users")
+}
+
+// Groups for organizing feedback sessions
+model Group {
+  id                     String   @id @default(cuid())
+  name                   String
+  description            String?
+  joinCode               String   @unique // For inviting members
+  isActive               Boolean  @default(true)
+  defaultCanGiveFeedback Boolean  @default(true) // Default permission for new members
+  defaultCanReceiveFeedback Boolean @default(true) // Default permission for new members
+  defaultCanCreateSessions Boolean @default(false) // Whether members can create sessions
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  // Creator relationship
+  creatorId String
+  creator   User   @relation("GroupCreator", fields: [creatorId], references: [id])
+
+  // Relationships
+  members          GroupMember[]
+  feedbackSessions FeedbackSession[]
+
+  @@map("groups")
+}
+
+// Group memberships with role-based permissions
+model GroupMember {
+  id       String   @id @default(cuid())
+  groupId  String
+  userId   String
+  role     String   @default("MEMBER") // "ADMIN", "MODERATOR", "MEMBER"
+  joinedAt DateTime @default(now())
+
+  // Feedback permissions
+  canGiveFeedback    Boolean @default(true)
+  canReceiveFeedback Boolean @default(true)
+  hasOptedOut        Boolean @default(false) // User opted out of receiving feedback
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Ensure unique user per group
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+// Structured feedback sessions with time controls
+model FeedbackSession {
+  id          String  @id @default(cuid())
+  groupId     String
+  title       String
+  description String?
+
+  // Session controls
+  status            String    @default("DRAFT") // "DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"
+  startsAt          DateTime?
+  endsAt            DateTime?
+  allowSelfFeedback Boolean   @default(false)
+  allowAnonymousFeedback Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  // Relationships
+  submissions FeedbackSubmission[]
+
+  @@map("feedback_sessions")
+}
+
+// Anonymous feedback submissions with privacy layers
+model FeedbackSubmission {
+  id           String @id @default(cuid())
+  sessionId    String
+  targetUserId String // Who receives the feedback
+  submitterId  String?
+
+  // Anonymity layers - separate from user identity
+  submitterToken String @unique // Anonymous identifier for submitter
+  submitterHash  String @unique // Hashed identifier for deduplication
+  isAnonymous    Boolean @default(true)
+
+  // Content analysis fields
+  content    String
+  sentiment  String? // "VERY_POSITIVE", "POSITIVE", "NEUTRAL", "NEGATIVE", "VERY_NEGATIVE"
+  isFlagged  Boolean @default(false)
+  flagReason String? // "INAPPROPRIATE_LANGUAGE", "HARASSMENT", "SPAM", "TOO_SHORT", "OFF_TOPIC", "OTHER"
+
+  // Metadata
+  ipAddress   String? // For spam prevention (hashed)
+  userAgent   String?
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  session    FeedbackSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  targetUser User            @relation("FeedbackTargetUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+  submitter  User?           @relation("FeedbackSubmitterUser", fields: [submitterId], references: [id], onDelete: SetNull)
+
+  // Prevent duplicate submissions
+  @@unique([sessionId, targetUserId, submitterHash])
+  @@unique([sessionId, targetUserId, submitterId])
+  @@map("feedback_submissions")
+}
+
+// Aggregated feedback for quick display and analytics
+model FeedbackAggregation {
+  id        String  @id @default(cuid())
+  userId    String  @unique // Per user
+  sessionId String? // Per session or overall
+
+  // Aggregated metrics
+  totalFeedbackReceived Int       @default(0)
+  averageSentiment      String? // Overall sentiment score
+  lastFeedbackAt        DateTime?
+
+  // Feedback themes (extracted via analysis) - stored as JSON strings
+  commonStrengths    String?
+  commonImprovements String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("feedback_aggregations")
+}
+
+// Audit trail for security and compliance
+model AuditLog {
+  id         String  @id @default(cuid())
+  userId     String? // User who performed action (if known)
+  action     String // Action type
+  resource   String // What was affected
+  resourceId String? // Specific resource ID
+
+  // Details
+  details   String? // JSON string of additional details
+  ipAddress String?
+  userAgent String?
+
+  occurredAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+// API rate limiting for security
+model RateLimit {
+  id          String   @id @default(cuid())
+  identifier  String // IP address, user ID, or token
+  action      String // What action is being limited
+  requests    Int      @default(1)
+  windowStart DateTime @default(now())
+
+  @@unique([identifier, action])
+  @@map("rate_limits")
+}
+
+// In-app notifications
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  data      String?
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+// Direct messages between users
+model DirectMessage {
+  id           String   @id @default(cuid())
+  senderId     String
+  recipientId  String
+  content      String
+  createdAt    DateTime @default(now())
+  readAt       DateTime?
+
+  sender    User @relation("DM_Sender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient User @relation("DM_Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, createdAt])
+  @@map("direct_messages")
+}
